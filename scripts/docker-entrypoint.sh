@@ -18,7 +18,7 @@ git clone https://$GITHUB_TOKEN@github.com${path} /usercontent/
 chown node:node -R /usercontent/
 cd /usercontent/ && \
   npm install -g husky && \
-  npm install && \
+  npm install --include=dev && \
   npm run --if-present build && \
   npm run --if-present build:app
 
