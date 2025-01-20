@@ -1,4 +1,4 @@
-ARG NODE_IMAGE=node:18-alpine
+ARG NODE_IMAGE=node:20-alpine
 
 FROM ${NODE_IMAGE}
 RUN apk add --no-cache bash git runuser
