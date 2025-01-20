@@ -1,6 +1,6 @@
 # web-runner
 
-Docker container that clone a GitHub repository and run an NodeJS web application server.
+Docker container that clones a GitHub repository containing a NodeJS web application. Build and runs the NodeJS application.
 
 ## Usage
 
