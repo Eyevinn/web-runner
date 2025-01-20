@@ -1,7 +1,7 @@
 ARG NODE_IMAGE=node:18-alpine
 
 FROM ${NODE_IMAGE}
-RUN apk add --no-cache bash git
+RUN apk add --no-cache bash git runuser
 ENV NODE_ENV=production
 WORKDIR /runner
 COPY ./scripts ./
