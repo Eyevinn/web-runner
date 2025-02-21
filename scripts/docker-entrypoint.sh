@@ -13,6 +13,8 @@ fi
 STAGING_DIR="/usercontent"
 path="/${GITHUB_URL#*://*/}" && [[ "/${GITHUB_URL}" == "${path}" ]] && path="/"
 
+echo "ensure staging dir is empty"
+rm -rf /usercontent/*
 echo "cloning https://***@github.com${path}"
 git clone https://$GITHUB_TOKEN@github.com${path} /usercontent/
 chown node:node -R /usercontent/
