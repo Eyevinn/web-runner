@@ -12,12 +12,35 @@ Build container image:
 % docker build -t web-runner:local .
 ```
 
+### Source code on GitHub
+
 Run container providing a GitHub url and token:
 
 ```
 % docker run --rm \
   -e GITHUB_URL=https://github.com/<org>/<repo>/ \
   -e GITHUB_TOKEN=<token> \
+  -p 8080:8080 web-runner:local
+```
+
+The web application is now available at http://localhost:8080
+
+### Source code on S3 bucket
+
+Source code can be packaged into a zip file and uploaded to an S3 bucket. To create the zip file go to the projects directory and run.
+
+```
+% zip -r ../my-app.zip ./
+```
+
+Copy this file to the S3 bucket and then run container providing S3 URL and access credentials. In this example an S3 bucket on a MinIO server in OSC
+
+```
+% docker run --rm \
+  -e SOURCE_URL=s3://code/my-app.zip \
+  -e S3_ENDPOINT_URL=https://eyevinnlab-birme.minio-minio.auto.prod.osaas.io \
+  -e AWS_ACCESS_KEY_ID=<username> \
+  -e AWS_SECRET_ACCESS_KEY=<password> \
   -p 8080:8080 web-runner:local
 ```
 
