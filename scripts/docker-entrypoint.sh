@@ -42,14 +42,15 @@ elif [[ ! -z "$S3_URL" ]]; then
 fi
 
 chown node:node -R /usercontent/
-cd /usercontent/ && \
-  npm install -g husky && \
-  npm install --include=dev && \
-  npm run --if-present build && \
-  npm run --if-present build:app
 
 if [[ ! -z "$OSC_ACCESS_TOKEN" ]] && [[ ! -z "$CONFIG_SVC" ]]; then
   echo "Loading environment variables from application config service '$CONFIG_SVC'"
   eval `npx -y @osaas/cli@latest web config-to-env $CONFIG_SVC`
 fi
+
+cd /usercontent/ && \
+  npm install -g husky && \
+  npm install --include=dev && \
+  npm run --if-present build && \
+  npm run --if-present build:app
 exec runuser -u node "$@"
