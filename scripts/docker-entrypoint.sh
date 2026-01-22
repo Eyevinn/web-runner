@@ -17,7 +17,7 @@ if [[ ! -z "$GITHUB_URL" ]]; then
   path="/${GITHUB_URL#*://*/}" && [[ "/${GITHUB_URL}" == "${path}" ]] && path="/"
 
   echo "ensure staging dir is empty"
-  rm -rf /usercontent/*
+  rm -rf /usercontent/* /usercontent/.[!.]*
   if [[ ! -z "$GITHUB_TOKEN" ]]; then
     echo "cloning https://***@github.com${path}"
     git clone https://$GITHUB_TOKEN@github.com${path} /usercontent/
