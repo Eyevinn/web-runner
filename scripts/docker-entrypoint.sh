@@ -33,6 +33,7 @@ if [[ ! -z "$GITHUB_URL" ]]; then
     echo "cloning https://github.com${path}"
     git clone https://github.com${path} /usercontent/
   fi
+  git config --global --add safe.directory /usercontent
   if [[ ! -z "$branch" ]]; then
     echo "checking out branch: $branch"
     git -C /usercontent/ checkout "$branch"
