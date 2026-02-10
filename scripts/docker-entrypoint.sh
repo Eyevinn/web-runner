@@ -16,6 +16,14 @@ fi
 if [[ ! -z "$GITHUB_URL" ]]; then
   path="/${GITHUB_URL#*://*/}" && [[ "/${GITHUB_URL}" == "${path}" ]] && path="/"
 
+  # Extract branch from URL fragment (e.g. #feat/seo-meta-fix-sprint/)
+  branch=""
+  if [[ "$GITHUB_URL" == *"#"* ]]; then
+    branch="${GITHUB_URL#*#}"
+    branch="${branch%/}"  # strip trailing slash if present
+    path="${path%%#*}"    # remove fragment from path
+  fi
+
   echo "ensure staging dir is empty"
   rm -rf /usercontent/* /usercontent/.[!.]*
   if [[ ! -z "$GITHUB_TOKEN" ]]; then
@@ -24,6 +32,10 @@ if [[ ! -z "$GITHUB_URL" ]]; then
   else
     echo "cloning https://github.com${path}"
     git clone https://github.com${path} /usercontent/
+  fi
+  if [[ ! -z "$branch" ]]; then
+    echo "checking out branch: $branch"
+    git -C /usercontent/ checkout "$branch"
   fi
 elif [[ ! -z "$S3_URL" ]]; then
   if [[ "$S3_URL" =~ ^.*\.zip$ ]]; then
