@@ -13,6 +13,10 @@ elif [[ ! -z "$SOURCE_URL" ]] && [[ "$SOURCE_URL" =~ ^s3://.*$ ]]; then
   S3_URL="$SOURCE_URL"
 fi
 
+node /runner/loading-server.js &
+LOADING_PID=$!
+trap 'kill $LOADING_PID 2>/dev/null; wait $LOADING_PID 2>/dev/null' EXIT
+
 if [[ ! -z "$GITHUB_URL" ]]; then
   path="/${GITHUB_URL#*://*/}" && [[ "/${GITHUB_URL}" == "${path}" ]] && path="/"
 
@@ -66,4 +70,21 @@ cd /usercontent/ && \
   npm install --include=dev && \
   npm run --if-present build && \
   npm run --if-present build:app
-exec runuser -u node "$@"
+BUILD_EXIT=$?
+
+kill $LOADING_PID 2>/dev/null
+wait $LOADING_PID 2>/dev/null
+trap - EXIT
+
+if [ $BUILD_EXIT -ne 0 ]; then
+  echo "Build failed with exit code $BUILD_EXIT"
+  exec node /runner/loading-server.js error-page.html
+fi
+
+runuser -u node "$@"
+APP_EXIT=$?
+
+if [ $APP_EXIT -ne 0 ]; then
+  echo "Application exited with code $APP_EXIT"
+  exec node /runner/loading-server.js error-page.html
+fi
