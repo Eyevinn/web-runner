@@ -65,6 +65,11 @@ if [[ ! -z "$OSC_ACCESS_TOKEN" ]] && [[ ! -z "$CONFIG_SVC" ]]; then
   eval `npx -y @osaas/cli@latest web config-to-env $CONFIG_SVC`
 fi
 
+if [[ -z "$APP_URL" ]] && [[ ! -z "$OSC_HOSTNAME" ]]; then
+  export APP_URL="https://$OSC_HOSTNAME"
+  echo "APP_URL set to $APP_URL"
+fi
+
 cd /usercontent/ && \
   npm install -g husky && \
   npm install --include=dev && \
