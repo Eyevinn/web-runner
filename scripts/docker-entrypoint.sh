@@ -70,6 +70,15 @@ if [[ -z "$APP_URL" ]] && [[ ! -z "$OSC_HOSTNAME" ]]; then
   echo "APP_URL set to $APP_URL"
 fi
 
+if [[ -z "$AUTH_URL" ]] && [[ ! -z "$OSC_HOSTNAME" ]]; then
+  if [[ ! -z "$AUTH_PATH" ]]; then
+    export AUTH_URL="https://$OSC_HOSTNAME$AUTH_PATH"
+  else
+    export AUTH_URL="https://$OSC_HOSTNAME/api/auth"
+  fi
+  echo "AUTH_URL set to $AUTH_URL"
+fi
+
 cd /usercontent/ && \
   npm install -g husky && \
   npm install --include=dev && \
