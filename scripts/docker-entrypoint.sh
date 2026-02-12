@@ -86,6 +86,8 @@ cd /usercontent/ && \
   npm run --if-present build:app
 BUILD_EXIT=$?
 
+chown node:node -R /usercontent/
+
 kill $LOADING_PID 2>/dev/null
 wait $LOADING_PID 2>/dev/null
 trap - EXIT
