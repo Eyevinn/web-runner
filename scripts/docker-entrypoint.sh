@@ -62,7 +62,12 @@ chown node:node -R /usercontent/
 
 if [[ ! -z "$OSC_ACCESS_TOKEN" ]] && [[ ! -z "$CONFIG_SVC" ]]; then
   echo "Loading environment variables from application config service '$CONFIG_SVC'"
-  eval `npx -y @osaas/cli@latest web config-to-env $CONFIG_SVC`
+  config_env_output=$(npx -y @osaas/cli@latest web config-to-env "$CONFIG_SVC" 2>&1)
+  if [ $? -eq 0 ]; then
+    eval "$config_env_output"
+  else
+    echo "Warning: Failed to load config from application config service: $config_env_output"
+  fi
 fi
 
 if [[ -z "$APP_URL" ]] && [[ ! -z "$OSC_HOSTNAME" ]]; then
