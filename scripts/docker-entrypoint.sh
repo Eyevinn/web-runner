@@ -84,7 +84,17 @@ if [[ -z "$AUTH_URL" ]] && [[ ! -z "$OSC_HOSTNAME" ]]; then
   echo "AUTH_URL set to $AUTH_URL"
 fi
 
-cd /usercontent/ && \
+WORK_DIR="/usercontent"
+if [[ ! -z "$SUB_PATH" ]]; then
+  WORK_DIR="/usercontent/$SUB_PATH"
+  if [[ ! -d "$WORK_DIR" ]]; then
+    echo "Error: SUB_PATH directory '$WORK_DIR' does not exist"
+    exit 1
+  fi
+  echo "Using SUB_PATH: $SUB_PATH (working directory: $WORK_DIR)"
+fi
+
+cd "$WORK_DIR" && \
   npm install -g husky && \
   npm install --include=dev && \
   npm run --if-present build && \
