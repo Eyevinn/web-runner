@@ -28,19 +28,36 @@ if [[ ! -z "$GITHUB_URL" ]]; then
     path="${path%%#*}"    # remove fragment from path
   fi
 
-  echo "ensure staging dir is empty"
-  rm -rf /usercontent/* /usercontent/.[!.]*
-  if [[ ! -z "$GITHUB_TOKEN" ]]; then
-    echo "cloning https://***@github.com${path}"
-    git clone https://$GITHUB_TOKEN@github.com${path} /usercontent/
-  else
-    echo "cloning https://github.com${path}"
-    git clone https://github.com${path} /usercontent/
-  fi
   git config --global --add safe.directory /usercontent
-  if [[ ! -z "$branch" ]]; then
-    echo "checking out branch: $branch"
-    git -C /usercontent/ checkout "$branch"
+
+  if [[ -d "/usercontent/.git" ]]; then
+    # Incremental update — repo already cloned (PVC case)
+    echo "repo already cloned, fetching latest changes"
+    git -C /usercontent/ fetch origin
+    if [[ ! -z "$branch" ]]; then
+      echo "resetting to origin/$branch"
+      git -C /usercontent/ reset --hard "origin/$branch"
+    else
+      # Use the default remote branch
+      default_branch=$(git -C /usercontent/ symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||')
+      echo "resetting to origin/${default_branch}"
+      git -C /usercontent/ reset --hard "origin/${default_branch}"
+    fi
+    # Remove untracked files/dirs but preserve node_modules and .next/cache
+    git -C /usercontent/ clean -fd --exclude=node_modules --exclude=.next
+  else
+    # First deploy — full clone
+    if [[ ! -z "$GITHUB_TOKEN" ]]; then
+      echo "cloning https://***@github.com${path}"
+      git clone https://$GITHUB_TOKEN@github.com${path} /usercontent/
+    else
+      echo "cloning https://github.com${path}"
+      git clone https://github.com${path} /usercontent/
+    fi
+    if [[ ! -z "$branch" ]]; then
+      echo "checking out branch: $branch"
+      git -C /usercontent/ checkout "$branch"
+    fi
   fi
 elif [[ ! -z "$S3_URL" ]]; then
   if [[ "$S3_URL" =~ ^.*\.zip$ ]]; then
@@ -96,12 +113,48 @@ if [[ ! -z "$SUB_PATH" ]]; then
   echo "Using SUB_PATH: $SUB_PATH (working directory: $WORK_DIR)"
 fi
 
-cd "$WORK_DIR" && \
+LOCKFILE_HASH_FILE="/tmp/.web-runner-lockfile-hash"
+LOCKFILE_PATH="$WORK_DIR/package-lock.json"
+
+# Determine whether to skip npm install
+_should_skip_install=false
+if [[ -d "$WORK_DIR/node_modules" ]] && [[ -f "$LOCKFILE_PATH" ]]; then
+  current_hash=$(sha256sum "$LOCKFILE_PATH" | awk '{print $1}')
+  if [[ -f "$LOCKFILE_HASH_FILE" ]]; then
+    cached_hash=$(cat "$LOCKFILE_HASH_FILE")
+    if [[ "$current_hash" == "$cached_hash" ]]; then
+      echo "package-lock.json unchanged, skipping npm install"
+      _should_skip_install=true
+    fi
+  fi
+fi
+
+cd "$WORK_DIR"
+if [[ "$_should_skip_install" == "false" ]]; then
   npm install -g husky && \
-  npm install --include=dev && \
+    npm install --include=dev
+  INSTALL_EXIT=$?
+  if [ $INSTALL_EXIT -ne 0 ]; then
+    BUILD_EXIT=$INSTALL_EXIT
+  else
+    # Record the lockfile hash after a successful install
+    if [[ -f "$LOCKFILE_PATH" ]]; then
+      sha256sum "$LOCKFILE_PATH" | awk '{print $1}' > "$LOCKFILE_HASH_FILE"
+    fi
+    npm run --if-present build && \
+      npm run --if-present build:app
+    BUILD_EXIT=$?
+  fi
+else
   npm run --if-present build && \
-  npm run --if-present build:app
-BUILD_EXIT=$?
+    npm run --if-present build:app
+  BUILD_EXIT=$?
+fi
+
+# Write healthz marker so the app's /healthz returns 200 once ready
+if [ $BUILD_EXIT -eq 0 ] && [ -d "$WORK_DIR/public" ]; then
+  echo "OK" > "$WORK_DIR/public/healthz"
+fi
 
 chown node:node -R /usercontent/
 
