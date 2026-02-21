@@ -65,6 +65,8 @@ if [[ ! -z "$OSC_ACCESS_TOKEN" ]] && [[ ! -z "$CONFIG_SVC" ]]; then
   config_env_output=$(npx -y @osaas/cli@latest web config-to-env "$CONFIG_SVC" 2>&1)
   if [ $? -eq 0 ]; then
     eval "$config_env_output"
+    var_count=$(echo "$config_env_output" | grep -c "^export " || true)
+    echo "[CONFIG] Loaded $var_count environment variable(s) — available for build and runtime"
   else
     echo "Warning: Failed to load config from application config service: $config_env_output"
   fi
