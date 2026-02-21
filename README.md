@@ -57,6 +57,12 @@ Copy this file to the S3 bucket and then run container providing S3 URL and acce
 
 The web application is now available at http://localhost:8080
 
+### Environment Variables at Build Time
+
+Environment variables from the Application Config Service are loaded **before** `npm install` and `npm run build`. This means they are available at both build time and runtime.
+
+For frameworks like Next.js that require environment variables during the build step (e.g. `NEXT_PUBLIC_*`), set them in your Application Config Service parameter store and they will be embedded in the build output automatically.
+
 ## Contributing
 
 See [CONTRIBUTING](CONTRIBUTING.md)
