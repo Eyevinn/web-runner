@@ -7,7 +7,12 @@ const html = fs.readFileSync(path.join(__dirname, file));
 const port = process.env.PORT || 8080;
 
 http
-  .createServer((_req, res) => {
+  .createServer((req, res) => {
+    if (req.url === '/healthz') {
+      res.writeHead(503, { "Content-Type": "text/plain" });
+      res.end("Building");
+      return;
+    }
     res.writeHead(200, {
       "Content-Type": "text/html",
       "Cache-Control": "no-cache",
