@@ -28,19 +28,42 @@ if [[ ! -z "$GITHUB_URL" ]]; then
     path="${path%%#*}"    # remove fragment from path
   fi
 
-  echo "ensure staging dir is empty"
-  rm -rf /usercontent/* /usercontent/.[!.]*
-  if [[ ! -z "$GITHUB_TOKEN" ]]; then
-    echo "cloning https://***@github.com${path}"
-    git clone https://$GITHUB_TOKEN@github.com${path} /usercontent/
-  else
-    echo "cloning https://github.com${path}"
-    git clone https://github.com${path} /usercontent/
-  fi
   git config --global --add safe.directory /usercontent
-  if [[ ! -z "$branch" ]]; then
-    echo "checking out branch: $branch"
-    git -C /usercontent/ checkout "$branch"
+
+  if [ -d "/usercontent/.git" ]; then
+    # PVC case: incremental update
+    echo "existing repo found, fetching updates"
+    git -C /usercontent/ fetch origin
+    if [[ ! -z "$branch" ]]; then
+      echo "resetting to origin/$branch"
+      git -C /usercontent/ checkout "$branch" 2>/dev/null || true
+      git -C /usercontent/ reset --hard "origin/$branch"
+    else
+      # Detect default branch
+      default_branch=$(git -C /usercontent/ symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@')
+      if [ -z "$default_branch" ]; then
+        default_branch="main"
+      fi
+      echo "resetting to origin/$default_branch"
+      git -C /usercontent/ reset --hard "origin/$default_branch"
+    fi
+    echo "cleaning untracked files (preserving node_modules and .next)"
+    git -C /usercontent/ clean -fd --exclude=node_modules --exclude=.next
+  else
+    # Fresh clone
+    echo "ensure staging dir is empty"
+    rm -rf /usercontent/* /usercontent/.[!.]*
+    if [[ ! -z "$GITHUB_TOKEN" ]]; then
+      echo "cloning https://***@github.com${path}"
+      git clone https://$GITHUB_TOKEN@github.com${path} /usercontent/
+    else
+      echo "cloning https://github.com${path}"
+      git clone https://github.com${path} /usercontent/
+    fi
+    if [[ ! -z "$branch" ]]; then
+      echo "checking out branch: $branch"
+      git -C /usercontent/ checkout "$branch"
+    fi
   fi
 elif [[ ! -z "$S3_URL" ]]; then
   if [[ "$S3_URL" =~ ^.*\.zip$ ]]; then
@@ -96,12 +119,57 @@ if [[ ! -z "$SUB_PATH" ]]; then
   echo "Using SUB_PATH: $SUB_PATH (working directory: $WORK_DIR)"
 fi
 
-cd "$WORK_DIR" && \
-  npm install -g husky && \
-  npm install --include=dev && \
-  npm run --if-present build && \
-  npm run --if-present build:app
+# Set up cache directories on persistent volume if available
+if [ -w "/data" ]; then
+  mkdir -p /data/node_modules /data/next-cache
+
+  # Symlink node_modules to persistent cache
+  if [ ! -L "$WORK_DIR/node_modules" ]; then
+    rm -rf "$WORK_DIR/node_modules"
+    ln -s /data/node_modules "$WORK_DIR/node_modules"
+  fi
+
+  # Set up .next/cache symlink
+  mkdir -p "$WORK_DIR/.next"
+  if [ ! -L "$WORK_DIR/.next/cache" ]; then
+    rm -rf "$WORK_DIR/.next/cache"
+    ln -s /data/next-cache "$WORK_DIR/.next/cache"
+  fi
+fi
+
+# Check if npm install can be skipped (lockfile unchanged)
+LOCKFILE_HASH=""
+if [ -f "$WORK_DIR/package-lock.json" ]; then
+  LOCKFILE_HASH=$(sha256sum "$WORK_DIR/package-lock.json" | cut -d' ' -f1)
+fi
+CACHED_HASH=""
+if [ -f "/data/.lockfile-hash" ]; then
+  CACHED_HASH=$(cat /data/.lockfile-hash)
+fi
+
+cd "$WORK_DIR"
+npm install -g husky 2>/dev/null || true
+
+if [ -d "$WORK_DIR/node_modules" ] && [ "$LOCKFILE_HASH" = "$CACHED_HASH" ] && [ -n "$LOCKFILE_HASH" ]; then
+  echo "package-lock.json unchanged, skipping npm install"
+else
+  echo "running npm install"
+  npm install --include=dev
+  # Cache the lockfile hash
+  if [ -n "$LOCKFILE_HASH" ] && [ -w "/data" ]; then
+    echo "$LOCKFILE_HASH" > /data/.lockfile-hash
+  fi
+fi
+
+npm run --if-present build
+npm run --if-present build:app
 BUILD_EXIT=$?
+
+if [ $BUILD_EXIT -eq 0 ]; then
+  # Signal readiness for health checks
+  mkdir -p "$WORK_DIR/public"
+  echo "OK" > "$WORK_DIR/public/healthz"
+fi
 
 chown node:node -R /usercontent/
 
