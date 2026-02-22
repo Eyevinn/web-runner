@@ -150,7 +150,7 @@ fi
 cd "$WORK_DIR"
 npm install -g husky 2>/dev/null || true
 
-if [ -d "$WORK_DIR/node_modules" ] && [ "$LOCKFILE_HASH" = "$CACHED_HASH" ] && [ -n "$LOCKFILE_HASH" ]; then
+if [ -d "$WORK_DIR/node_modules" ] && [ "$(ls -A "$WORK_DIR/node_modules" 2>/dev/null)" ] && [ "$LOCKFILE_HASH" = "$CACHED_HASH" ] && [ -n "$LOCKFILE_HASH" ]; then
   echo "package-lock.json unchanged, skipping npm install"
 else
   echo "running npm install"
