@@ -123,13 +123,7 @@ fi
 if [ -w "/data" ]; then
   mkdir -p /data/node_modules /data/next-cache
 
-  # Symlink node_modules to persistent cache
-  if [ ! -L "$WORK_DIR/node_modules" ]; then
-    rm -rf "$WORK_DIR/node_modules"
-    ln -s /data/node_modules "$WORK_DIR/node_modules"
-  fi
-
-  # Set up .next/cache symlink
+  # Set up .next/cache symlink (next build follows symlinks correctly)
   mkdir -p "$WORK_DIR/.next"
   if [ ! -L "$WORK_DIR/.next/cache" ]; then
     rm -rf "$WORK_DIR/.next/cache"
@@ -137,7 +131,7 @@ if [ -w "/data" ]; then
   fi
 fi
 
-# Check if npm install can be skipped (lockfile unchanged)
+# Check if npm install can be skipped (lockfile unchanged + cached node_modules)
 LOCKFILE_HASH=""
 if [ -f "$WORK_DIR/package-lock.json" ]; then
   LOCKFILE_HASH=$(sha256sum "$WORK_DIR/package-lock.json" | cut -d' ' -f1)
@@ -150,14 +144,23 @@ fi
 cd "$WORK_DIR"
 npm install -g husky 2>/dev/null || true
 
-if [ -d "$WORK_DIR/node_modules" ] && [ "$(ls -A "$WORK_DIR/node_modules" 2>/dev/null)" ] && [ "$LOCKFILE_HASH" = "$CACHED_HASH" ] && [ -n "$LOCKFILE_HASH" ]; then
-  echo "package-lock.json unchanged, skipping npm install"
+# Restore node_modules from PVC cache if lockfile unchanged.
+# Note: we do NOT symlink node_modules because npm's reify step removes
+# symlinks ("Removing non-directory") and creates a real directory,
+# defeating the cache. Instead we copy from the PVC backup.
+if [ -w "/data" ] && [ "$(ls -A /data/node_modules 2>/dev/null)" ] && [ "$LOCKFILE_HASH" = "$CACHED_HASH" ] && [ -n "$LOCKFILE_HASH" ]; then
+  echo "package-lock.json unchanged, restoring node_modules from cache"
+  rm -rf "$WORK_DIR/node_modules"
+  cp -a /data/node_modules "$WORK_DIR/node_modules"
 else
   echo "running npm install"
   npm install --include=dev
-  # Cache the lockfile hash
+  # Cache node_modules and lockfile hash to PVC
   if [ -n "$LOCKFILE_HASH" ] && [ -w "/data" ]; then
     echo "$LOCKFILE_HASH" > /data/.lockfile-hash
+    echo "caching node_modules to PVC"
+    rm -rf /data/node_modules
+    cp -a "$WORK_DIR/node_modules" /data/node_modules
   fi
 fi
 
