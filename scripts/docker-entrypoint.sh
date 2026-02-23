@@ -86,12 +86,24 @@ chown node:node -R /usercontent/
 if [[ ! -z "$OSC_ACCESS_TOKEN" ]] && [[ ! -z "$CONFIG_SVC" ]]; then
   echo "Loading environment variables from application config service '$CONFIG_SVC'"
   config_env_output=$(npx -y @osaas/cli@latest web config-to-env "$CONFIG_SVC" 2>&1)
-  if [ $? -eq 0 ]; then
-    eval "$config_env_output"
-    var_count=$(echo "$config_env_output" | grep -c "^export " || true)
-    echo "[CONFIG] Loaded $var_count environment variable(s) — available for build and runtime"
+  config_exit=$?
+  if [ $config_exit -eq 0 ]; then
+    # Only eval lines that are valid shell export statements to prevent
+    # executing error messages or malformed output as shell commands
+    valid_exports=$(echo "$config_env_output" | grep "^export [A-Za-z_][A-Za-z0-9_]*=")
+    if [ -n "$valid_exports" ]; then
+      eval "$valid_exports"
+      var_count=$(echo "$valid_exports" | wc -l | tr -d ' ')
+      echo "[CONFIG] Loaded $var_count environment variable(s) — available for build and runtime"
+    else
+      echo "[CONFIG] WARNING: Config service '$CONFIG_SVC' returned no valid environment variables."
+      echo "[CONFIG] This may indicate an authentication failure or empty parameter store."
+      echo "[CONFIG] Raw output: $config_env_output"
+    fi
   else
-    echo "Warning: Failed to load config from application config service: $config_env_output"
+    echo "[CONFIG] ERROR: Failed to load config from '$CONFIG_SVC' (exit code $config_exit)."
+    echo "[CONFIG] The config service token may have expired. Recreate the app to fix: delete-my-app + create-my-app."
+    echo "[CONFIG] Raw output: $config_env_output"
   fi
 fi
 
