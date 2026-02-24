@@ -84,14 +84,19 @@ fi
 chown node:node -R /usercontent/
 
 if [[ ! -z "$OSC_ACCESS_TOKEN" ]] && [[ ! -z "$CONFIG_SVC" ]]; then
-  echo "Loading environment variables from application config service '$CONFIG_SVC'"
+  echo "[CONFIG] Loading environment variables from config service '$CONFIG_SVC'"
   config_env_output=$(npx -y @osaas/cli@latest web config-to-env "$CONFIG_SVC" 2>&1)
   if [ $? -eq 0 ]; then
     eval "$config_env_output"
     var_count=$(echo "$config_env_output" | grep -c "^export " || true)
     echo "[CONFIG] Loaded $var_count environment variable(s) — available for build and runtime"
   else
-    echo "Warning: Failed to load config from application config service: $config_env_output"
+    echo "[CONFIG] Warning: Failed to load config from application config service."
+    echo "[CONFIG] Output: $config_env_output"
+    if echo "$config_env_output" | grep -qi "expired\|unauthorized\|401"; then
+      echo "[CONFIG] Action required: Your OSC_ACCESS_TOKEN may have expired."
+      echo "[CONFIG] Use the 'refresh-app-config' MCP tool to issue a fresh token."
+    fi
   fi
 fi
 
