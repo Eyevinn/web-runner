@@ -122,6 +122,9 @@ fi
 # Set up cache directories on persistent volume if available
 if [ -w "/data" ]; then
   mkdir -p /data/node_modules /data/next-cache
+  # Ensure the node user owns PVC cache directories to prevent EACCES at runtime
+  chown -R node:node /data/next-cache 2>/dev/null || true
+  chown -R node:node /data/node_modules 2>/dev/null || true
 
   # Set up .next/cache symlink (next build follows symlinks correctly)
   mkdir -p "$WORK_DIR/.next"
