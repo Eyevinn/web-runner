@@ -120,7 +120,7 @@ if [[ ! -z "$OSC_ACCESS_TOKEN" ]] && [[ ! -z "$CONFIG_SVC" ]]; then
     echo "[CONFIG] Raw output: $config_env_output"
     if echo "$config_env_output" | grep -qi "expired\|unauthorized\|401"; then
       echo "[CONFIG] Action required: Your OSC_ACCESS_TOKEN may have expired."
-      echo "[CONFIG] Use the 'refresh-app-config' MCP tool to issue a fresh token."
+      echo "[CONFIG] Use 'restart-my-app' with rebuild=true to issue a new long-lived refresh token."
     fi
   fi
 fi
