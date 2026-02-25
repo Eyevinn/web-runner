@@ -83,6 +83,22 @@ fi
 
 chown node:node -R /usercontent/
 
+# Exchange runner refresh token for a fresh PAT (if applicable)
+if [[ ! -z "$OSC_ACCESS_TOKEN" ]] && [[ ! -z "$CONFIG_SVC" ]]; then
+  REFRESH_RESULT=$(curl -sf -X POST \
+    "https://token.svc.${OSC_ENV:-prod}.osaas.io/runner-token/refresh" \
+    -H "Content-Type: application/json" \
+    -d "{\"token\":\"$OSC_ACCESS_TOKEN\"}" 2>/dev/null)
+  if [ $? -eq 0 ] && [ ! -z "$REFRESH_RESULT" ]; then
+    FRESH_PAT=$(echo "$REFRESH_RESULT" | jq -r '.token // empty')
+    if [ ! -z "$FRESH_PAT" ]; then
+      export OSC_ACCESS_TOKEN="$FRESH_PAT"
+      echo "[CONFIG] Refreshed access token via runner refresh token"
+    fi
+  fi
+  # If refresh failed, OSC_ACCESS_TOKEN retains its original value (backward compat)
+fi
+
 if [[ ! -z "$OSC_ACCESS_TOKEN" ]] && [[ ! -z "$CONFIG_SVC" ]]; then
   echo "[CONFIG] Loading environment variables from config service '$CONFIG_SVC'"
   config_env_output=$(npx -y @osaas/cli@latest web config-to-env "$CONFIG_SVC" 2>&1)

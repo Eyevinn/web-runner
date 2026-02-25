@@ -1,7 +1,7 @@
 ARG NODE_IMAGE=node:20-alpine
 
 FROM ${NODE_IMAGE}
-RUN apk add --no-cache bash git runuser aws-cli
+RUN apk add --no-cache bash git runuser aws-cli curl jq
 ENV NODE_ENV=production
 WORKDIR /runner
 COPY ./scripts ./
