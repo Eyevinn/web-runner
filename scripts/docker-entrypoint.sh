@@ -7,8 +7,22 @@ if [ -z "$SOURCE_URL" ] && [ -z "$GITHUB_URL" ]; then
   exit 1
 fi
 
-if [[ ! -z "$SOURCE_URL" ]] && [[ "$SOURCE_URL" =~ ^https?://github\.com/ ]]; then
-  GITHUB_URL="$SOURCE_URL"
+# Backward compat: GITHUB_URL env var is treated as a GitHub HTTPS URL.
+# If it already looks like a full HTTPS URL use it as-is; otherwise prepend
+# the github.com base so that bare "owner/repo" values still work.
+if [[ -z "$SOURCE_URL" ]] && [[ ! -z "$GITHUB_URL" ]]; then
+  if [[ "$GITHUB_URL" =~ ^https?:// ]]; then
+    SOURCE_URL="$GITHUB_URL"
+  else
+    SOURCE_URL="https://github.com/$GITHUB_URL"
+  fi
+fi
+
+# Prefer GIT_TOKEN; fall back to GITHUB_TOKEN for backward compatibility
+TOKEN="${GIT_TOKEN:-$GITHUB_TOKEN}"
+
+if [[ ! -z "$SOURCE_URL" ]] && [[ "$SOURCE_URL" =~ ^https?:// ]]; then
+  GIT_URL="$SOURCE_URL"
 elif [[ ! -z "$SOURCE_URL" ]] && [[ "$SOURCE_URL" =~ ^s3://.*$ ]]; then
   S3_URL="$SOURCE_URL"
 fi
@@ -17,21 +31,26 @@ node /runner/loading-server.js &
 LOADING_PID=$!
 trap 'kill $LOADING_PID 2>/dev/null; wait $LOADING_PID 2>/dev/null' EXIT
 
-if [[ ! -z "$GITHUB_URL" ]]; then
-  path="/${GITHUB_URL#*://*/}" && [[ "/${GITHUB_URL}" == "${path}" ]] && path="/"
+if [[ ! -z "$GIT_URL" ]]; then
+  # Extract host and path from the URL dynamically (supports any HTTPS git host)
+  GIT_HOST="${GIT_URL#*://}"   # strip scheme
+  GIT_HOST="${GIT_HOST%%/*}"   # keep only the hostname
+  GIT_PATH="/${GIT_URL#*://*/}"
+  [[ "/${GIT_URL}" == "${GIT_PATH}" ]] && GIT_PATH="/"
 
   # Extract branch from URL fragment (e.g. #feat/seo-meta-fix-sprint/)
   branch=""
-  if [[ "$GITHUB_URL" == *"#"* ]]; then
-    branch="${GITHUB_URL#*#}"
-    branch="${branch%/}"  # strip trailing slash if present
-    path="${path%%#*}"    # remove fragment from path
+  if [[ "$GIT_URL" == *"#"* ]]; then
+    branch="${GIT_URL#*#}"
+    branch="${branch%/}"        # strip trailing slash if present
+    GIT_PATH="${GIT_PATH%%#*}"  # remove fragment from path
   fi
 
   git config --global --add safe.directory /usercontent
 
   if [ -d "/usercontent/.git" ]; then
-    # PVC case: incremental update
+    # PVC case: incremental update — uses the already-configured git remote,
+    # so no changes needed here regardless of which host was used for the clone.
     echo "existing repo found, fetching updates"
     git -C /usercontent/ fetch origin
     if [[ ! -z "$branch" ]]; then
@@ -50,15 +69,15 @@ if [[ ! -z "$GITHUB_URL" ]]; then
     echo "cleaning untracked files (preserving node_modules and .next)"
     git -C /usercontent/ clean -fd --exclude=node_modules --exclude=.next
   else
-    # Fresh clone
+    # Fresh clone — inject token into the URL if provided
     echo "ensure staging dir is empty"
     rm -rf /usercontent/* /usercontent/.[!.]*
-    if [[ ! -z "$GITHUB_TOKEN" ]]; then
-      echo "cloning https://***@github.com${path}"
-      git clone https://$GITHUB_TOKEN@github.com${path} /usercontent/
+    if [[ ! -z "$TOKEN" ]]; then
+      echo "cloning https://***@${GIT_HOST}${GIT_PATH}"
+      git clone "https://${TOKEN}@${GIT_HOST}${GIT_PATH}" /usercontent/
     else
-      echo "cloning https://github.com${path}"
-      git clone https://github.com${path} /usercontent/
+      echo "cloning https://${GIT_HOST}${GIT_PATH}"
+      git clone "https://${GIT_HOST}${GIT_PATH}" /usercontent/
     fi
     if [[ ! -z "$branch" ]]; then
       echo "checking out branch: $branch"
