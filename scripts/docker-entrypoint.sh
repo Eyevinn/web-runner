@@ -74,7 +74,7 @@ if [[ ! -z "$GIT_URL" ]]; then
     rm -rf /usercontent/* /usercontent/.[!.]*
     if [[ ! -z "$TOKEN" ]]; then
       echo "cloning https://***@${GIT_HOST}${GIT_PATH}"
-      git clone "https://${TOKEN}@${GIT_HOST}${GIT_PATH}" /usercontent/
+      git clone "https://token:${TOKEN}@${GIT_HOST}${GIT_PATH}" /usercontent/
     else
       echo "cloning https://${GIT_HOST}${GIT_PATH}"
       git clone "https://${GIT_HOST}${GIT_PATH}" /usercontent/
