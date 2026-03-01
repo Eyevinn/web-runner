@@ -118,6 +118,7 @@ if [[ ! -z "$OSC_ACCESS_TOKEN" ]] && [[ ! -z "$CONFIG_SVC" ]]; then
   # If refresh failed, OSC_ACCESS_TOKEN retains its original value (backward compat)
 fi
 
+LOADED_CONFIG_EXPORTS=""
 if [[ ! -z "$OSC_ACCESS_TOKEN" ]] && [[ ! -z "$CONFIG_SVC" ]]; then
   echo "[CONFIG] Loading environment variables from config service '$CONFIG_SVC'"
   config_env_output=$(npx -y @osaas/cli@latest web config-to-env "$CONFIG_SVC" 2>&1)
@@ -130,6 +131,8 @@ if [[ ! -z "$OSC_ACCESS_TOKEN" ]] && [[ ! -z "$CONFIG_SVC" ]]; then
       eval "$valid_exports"
       var_count=$(echo "$valid_exports" | wc -l | tr -d ' ')
       echo "[CONFIG] Loaded $var_count environment variable(s) — available for build and runtime"
+      # Save for later: write to .env.osc when SUB_PATH is set (see below)
+      LOADED_CONFIG_EXPORTS="$valid_exports"
     else
       echo "[CONFIG] WARNING: Config service returned success but no valid export statements."
       echo "[CONFIG] Raw output: $config_env_output"
@@ -166,6 +169,15 @@ if [[ ! -z "$SUB_PATH" ]]; then
     exit 1
   fi
   echo "Using SUB_PATH: $SUB_PATH (working directory: $WORK_DIR)"
+
+  # When using subPath, write config vars to .env.osc so workspace start scripts
+  # can load them via dotenv (or equivalent) regardless of shell inheritance.
+  # This is necessary because workspace-specific package scripts may be launched
+  # in a new shell context that does not inherit the exports evaluated above.
+  if [[ -n "$LOADED_CONFIG_EXPORTS" ]]; then
+    echo "$LOADED_CONFIG_EXPORTS" | sed 's/^export //' > "$WORK_DIR/.env.osc"
+    echo "[CONFIG] Wrote config vars to $WORK_DIR/.env.osc for workspace isolation compatibility"
+  fi
 fi
 
 # Set up cache directories on persistent volume if available
