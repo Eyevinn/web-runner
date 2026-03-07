@@ -74,7 +74,7 @@ if [[ ! -z "$GIT_URL" ]]; then
     rm -rf /usercontent/* /usercontent/.[!.]*
     if [[ ! -z "$TOKEN" ]]; then
       echo "cloning https://***@${GIT_HOST}${GIT_PATH}"
-      git clone "https://token:${TOKEN}@${GIT_HOST}${GIT_PATH}" /usercontent/
+      git clone "https://${TOKEN}@${GIT_HOST}${GIT_PATH}" /usercontent/
     else
       echo "cloning https://${GIT_HOST}${GIT_PATH}"
       git clone "https://${GIT_HOST}${GIT_PATH}" /usercontent/
@@ -246,7 +246,7 @@ trap - EXIT
 
 if [ $BUILD_EXIT -ne 0 ]; then
   echo "Build failed with exit code $BUILD_EXIT"
-  exec node /runner/loading-server.js error-page.html
+  exec node /runner/loading-server.js error-page.html failed
 fi
 
 runuser -u node "$@"
@@ -254,5 +254,5 @@ APP_EXIT=$?
 
 if [ $APP_EXIT -ne 0 ]; then
   echo "Application exited with code $APP_EXIT"
-  exec node /runner/loading-server.js error-page.html
+  exec node /runner/loading-server.js error-page.html failed
 fi
