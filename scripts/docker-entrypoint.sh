@@ -229,8 +229,11 @@ else
 fi
 
 npm run --if-present build
-npm run --if-present build:app
 BUILD_EXIT=$?
+if [ $BUILD_EXIT -eq 0 ]; then
+  npm run --if-present build:app
+  BUILD_EXIT=$?
+fi
 
 if [ $BUILD_EXIT -eq 0 ]; then
   # Signal readiness for health checks
