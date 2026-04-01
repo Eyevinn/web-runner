@@ -9,7 +9,18 @@ const port = process.env.PORT || 8080;
 
 http
   .createServer((req, res) => {
-    if (req.url === '/healthz') {
+    if (req.url === "/__osc/commit-info") {
+      try {
+        const info = fs.readFileSync("/usercontent/.commit-info.json", "utf8");
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(info);
+      } catch {
+        res.writeHead(404, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "no commit info available" }));
+      }
+      return;
+    }
+    if (req.url === "/healthz") {
       if (buildStatus === "failed") {
         res.writeHead(500, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ status: "build-failed" }));
