@@ -6,15 +6,30 @@ STAGING_DIR="/usercontent"
 write_commit_info() {
   local repo_dir="$1"
   if [ -d "$repo_dir/.git" ]; then
-    git -C "$repo_dir" log -5 --format='{"sha":"%H","shortSha":"%h","message":"%s","author":"%an","date":"%aI"}' \
-      | jq -s '{
-          sha: .[0].sha,
-          shortSha: .[0].shortSha,
-          message: .[0].message,
-          author: .[0].author,
-          date: .[0].date,
-          recentCommits: .
-        }' > "$repo_dir/.commit-info.json" 2>/dev/null || true
+    local sha shortSha msg author date recentCommits
+    sha=$(git -C "$repo_dir" rev-parse HEAD 2>/dev/null) || return 0
+    shortSha=$(git -C "$repo_dir" rev-parse --short HEAD 2>/dev/null) || return 0
+    msg=$(git -C "$repo_dir" log -1 --format='%s' 2>/dev/null) || return 0
+    author=$(git -C "$repo_dir" log -1 --format='%an' 2>/dev/null) || return 0
+    date=$(git -C "$repo_dir" log -1 --format='%aI' 2>/dev/null) || return 0
+    recentCommits=$(git -C "$repo_dir" log -5 --format='%H' 2>/dev/null | while read -r c_sha; do
+      jq -n \
+        --arg sha "$c_sha" \
+        --arg shortSha "$(git -C "$repo_dir" rev-parse --short "$c_sha" 2>/dev/null)" \
+        --arg message "$(git -C "$repo_dir" log -1 --format='%s' "$c_sha" 2>/dev/null)" \
+        --arg author "$(git -C "$repo_dir" log -1 --format='%an' "$c_sha" 2>/dev/null)" \
+        --arg date "$(git -C "$repo_dir" log -1 --format='%aI' "$c_sha" 2>/dev/null)" \
+        '{sha:$sha,shortSha:$shortSha,message:$message,author:$author,date:$date}'
+    done | jq -s '.' 2>/dev/null) || recentCommits='[]'
+    jq -n \
+      --arg sha "$sha" \
+      --arg shortSha "$shortSha" \
+      --arg message "$msg" \
+      --arg author "$author" \
+      --arg date "$date" \
+      --argjson recentCommits "$recentCommits" \
+      '{sha:$sha,shortSha:$shortSha,message:$message,author:$author,date:$date,recentCommits:$recentCommits}' \
+      > "$repo_dir/.commit-info.json" 2>/dev/null || true
     echo "Commit info: $(jq -r '.shortSha + " - " + .message' "$repo_dir/.commit-info.json" 2>/dev/null || echo 'unavailable')"
   fi
 }
