@@ -2,6 +2,23 @@
 
 STAGING_DIR="/usercontent"
 
+# Write commit metadata to a well-known file for platform visibility
+write_commit_info() {
+  local repo_dir="$1"
+  if [ -d "$repo_dir/.git" ]; then
+    git -C "$repo_dir" log -5 --format='{"sha":"%H","shortSha":"%h","message":"%s","author":"%an","date":"%aI"}' \
+      | jq -s '{
+          sha: .[0].sha,
+          shortSha: .[0].shortSha,
+          message: .[0].message,
+          author: .[0].author,
+          date: .[0].date,
+          recentCommits: .
+        }' > "$repo_dir/.commit-info.json" 2>/dev/null || true
+    echo "Commit info: $(jq -r '.shortSha + " - " + .message' "$repo_dir/.commit-info.json" 2>/dev/null || echo 'unavailable')"
+  fi
+}
+
 if [ -z "$SOURCE_URL" ] && [ -z "$GITHUB_URL" ]; then
   echo "SOURCE_URL or GITHUB_URL must be set. Exiting."
   exit 1
@@ -68,6 +85,7 @@ if [[ ! -z "$GIT_URL" ]]; then
     fi
     echo "cleaning untracked files (preserving node_modules and .next)"
     git -C /usercontent/ clean -fd --exclude=node_modules --exclude=.next
+    write_commit_info /usercontent
   else
     # Fresh clone — inject token into the URL if provided
     echo "ensure staging dir is empty"
@@ -83,6 +101,7 @@ if [[ ! -z "$GIT_URL" ]]; then
       echo "checking out branch: $branch"
       git -C /usercontent/ checkout "$branch"
     fi
+    write_commit_info /usercontent
   fi
 elif [[ ! -z "$S3_URL" ]]; then
   if [[ "$S3_URL" =~ ^.*\.zip$ ]]; then
@@ -239,6 +258,11 @@ if [ $BUILD_EXIT -eq 0 ]; then
   # Signal readiness for health checks
   mkdir -p "$WORK_DIR/public"
   echo "OK" > "$WORK_DIR/public/healthz"
+  # Make commit info available via static file serving (e.g. Next.js public dir)
+  if [ -f "/usercontent/.commit-info.json" ]; then
+    mkdir -p "$WORK_DIR/public/__osc"
+    cp /usercontent/.commit-info.json "$WORK_DIR/public/__osc/commit-info.json"
+  fi
 fi
 
 chown node:node -R /usercontent/
