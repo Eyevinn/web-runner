@@ -112,6 +112,8 @@ if [[ ! -z "$GIT_URL" ]]; then
       echo "cloning https://${GIT_HOST}${GIT_PATH}"
       git clone "https://${GIT_HOST}${GIT_PATH}" /usercontent/
     fi
+    # Scrub PAT from origin remote — token must not persist to .git/config
+    git -C /usercontent/ remote set-url origin "https://${GIT_HOST}${GIT_PATH}"
     if [[ ! -z "$branch" ]]; then
       echo "checking out branch: $branch"
       git -C /usercontent/ checkout "$branch"
