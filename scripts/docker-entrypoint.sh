@@ -66,7 +66,11 @@ trap 'kill $LOADING_PID 2>/dev/null; wait $LOADING_PID 2>/dev/null' EXIT
 if [[ ! -z "$GIT_URL" ]]; then
   # Extract host and path from the URL dynamically (supports any HTTPS git host)
   GIT_HOST="${GIT_URL#*://}"   # strip scheme
-  GIT_HOST="${GIT_HOST%%/*}"   # keep only the hostname
+  GIT_HOST="${GIT_HOST%%/*}"   # keep only the hostname (may include user:pass@ if SOURCE_URL embeds credentials)
+  # Variant with any embedded credentials stripped — used for log lines and the
+  # persisted remote URL so that PATs never leak into pod logs or .git/config.
+  # When SOURCE_URL has no credentials, this is identical to GIT_HOST.
+  GIT_HOST_PUBLIC="${GIT_HOST##*@}"
   GIT_PATH="/${GIT_URL#*://*/}"
   [[ "/${GIT_URL}" == "${GIT_PATH}" ]] && GIT_PATH="/"
 
@@ -106,14 +110,19 @@ if [[ ! -z "$GIT_URL" ]]; then
     echo "ensure staging dir is empty"
     rm -rf /usercontent/* /usercontent/.[!.]*
     if [[ ! -z "$TOKEN" ]]; then
-      echo "cloning https://***@${GIT_HOST}${GIT_PATH}"
-      git clone "https://${TOKEN}@${GIT_HOST}${GIT_PATH}" /usercontent/
-    else
-      echo "cloning https://${GIT_HOST}${GIT_PATH}"
+      echo "cloning https://***@${GIT_HOST_PUBLIC}${GIT_PATH}"
+      git clone "https://${TOKEN}@${GIT_HOST_PUBLIC}${GIT_PATH}" /usercontent/
+    elif [[ "$GIT_HOST" != "$GIT_HOST_PUBLIC" ]]; then
+      # SOURCE_URL embeds credentials (e.g. Gitea: https://user:pass@host/...).
+      # Clone with them in place but keep them out of the log line.
+      echo "cloning https://***@${GIT_HOST_PUBLIC}${GIT_PATH}"
       git clone "https://${GIT_HOST}${GIT_PATH}" /usercontent/
+    else
+      echo "cloning https://${GIT_HOST_PUBLIC}${GIT_PATH}"
+      git clone "https://${GIT_HOST_PUBLIC}${GIT_PATH}" /usercontent/
     fi
     # Scrub PAT from origin remote — token must not persist to .git/config
-    git -C /usercontent/ remote set-url origin "https://${GIT_HOST}${GIT_PATH}"
+    git -C /usercontent/ remote set-url origin "https://${GIT_HOST_PUBLIC}${GIT_PATH}"
     if [[ ! -z "$branch" ]]; then
       echo "checking out branch: $branch"
       git -C /usercontent/ checkout "$branch"
