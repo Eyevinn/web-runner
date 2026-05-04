@@ -85,10 +85,17 @@ if [[ ! -z "$GIT_URL" ]]; then
   git config --global --add safe.directory /usercontent
 
   if [ -d "/usercontent/.git" ]; then
-    # PVC case: incremental update — uses the already-configured git remote,
-    # so no changes needed here regardless of which host was used for the clone.
     echo "existing repo found, fetching updates"
+    # Re-inject credentials before fetch — token was scrubbed from origin after initial clone.
+    # Without this, private-repo fetches fail silently and reset resolves stale cached refs.
+    if [[ ! -z "$TOKEN" ]]; then
+      git -C /usercontent/ remote set-url origin "https://${TOKEN}@${GIT_HOST_PUBLIC}${GIT_PATH}"
+    elif [[ "$GIT_HOST" != "$GIT_HOST_PUBLIC" ]]; then
+      git -C /usercontent/ remote set-url origin "https://${GIT_HOST}${GIT_PATH}"
+    fi
     git -C /usercontent/ fetch origin
+    # Strip credentials again so PAT does not persist in .git/config
+    git -C /usercontent/ remote set-url origin "https://${GIT_HOST_PUBLIC}${GIT_PATH}"
     if [[ ! -z "$branch" ]]; then
       echo "resetting to origin/$branch"
       git -C /usercontent/ checkout "$branch" 2>/dev/null || true
