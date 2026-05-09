@@ -57,6 +57,29 @@ Copy this file to the S3 bucket and then run container providing S3 URL and acce
 
 The web application is now available at http://localhost:8080
 
+## Environment Variables
+
+| Variable | Required | Description |
+|---|---|---|
+| `GITHUB_URL` | Yes* | HTTPS URL to the GitHub repository to clone. Deprecated alias for `SOURCE_URL`. |
+| `SOURCE_URL` | Yes* | URL to the source code. Accepts HTTPS git URLs (any host) or `s3://bucket/path.zip`. |
+| `GIT_TOKEN` | No | Personal access token for cloning private repositories. Preferred over `GITHUB_TOKEN`. |
+| `GITHUB_TOKEN` | No | Alias for `GIT_TOKEN` (kept for backward compatibility). |
+| `OSC_ACCESS_TOKEN` | No | Service access token issued by Eyevinn OSC. Required when `CONFIG_SVC` is set to load environment variables from the Application Config Service. |
+| `CONFIG_API_KEY` | No | API key for encrypted parameter store. When set alongside `OSC_ACCESS_TOKEN` and `CONFIG_SVC`, secret parameters are decrypted before being injected as environment variables. |
+| `CONFIG_SVC` | No | Name of the Application Config Service parameter store to load environment variables from. |
+| `OSC_ENV` | No | OSC environment (`prod`, `stage`, `dev`). Defaults to `prod`. Affects which token and config service endpoints are used. |
+| `OSC_HOSTNAME` | No | Public hostname of the running container. Used to set `APP_URL` and `AUTH_URL` automatically when those variables are not explicitly set. |
+| `SUB_PATH` | No | Relative path within the cloned repository to use as the working directory (for monorepos). |
+| `APP_URL` | No | Override for the application base URL. Defaults to `https://$OSC_HOSTNAME` when `OSC_HOSTNAME` is set. |
+| `AUTH_URL` | No | Override for the authentication endpoint URL. Defaults to `https://$OSC_HOSTNAME/api/auth`. |
+| `AUTH_PATH` | No | Path suffix appended to `OSC_HOSTNAME` to form `AUTH_URL`. Used when the auth endpoint is not at `/api/auth`. |
+| `S3_ENDPOINT_URL` | No | Custom S3-compatible endpoint URL (e.g. MinIO). Required when `SOURCE_URL` points to a non-AWS S3 bucket. |
+| `AWS_ACCESS_KEY_ID` | No | Access key ID for S3 source downloads. |
+| `AWS_SECRET_ACCESS_KEY` | No | Secret access key for S3 source downloads. |
+
+\* Either `GITHUB_URL` or `SOURCE_URL` must be set.
+
 ### Environment Variables at Build Time
 
 Environment variables from the Application Config Service are loaded **before** `npm install` and `npm run build`. This means they are available at both build time and runtime.
