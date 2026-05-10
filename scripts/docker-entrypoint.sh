@@ -96,7 +96,11 @@ if [[ ! -z "$GIT_URL" ]]; then
     git -C /usercontent/ fetch origin
     # Strip credentials again so PAT does not persist in .git/config
     git -C /usercontent/ remote set-url origin "https://${GIT_HOST_PUBLIC}${GIT_PATH}"
-    if [[ ! -z "$branch" ]]; then
+    if [ -n "${GIT_COMMIT_SHA:-}" ]; then
+      echo "checking out exact commit: $GIT_COMMIT_SHA"
+      git -C /usercontent/ fetch origin "$GIT_COMMIT_SHA" 2>/dev/null || true
+      git -C /usercontent/ checkout --detach "$GIT_COMMIT_SHA"
+    elif [[ ! -z "$branch" ]]; then
       echo "resetting to origin/$branch"
       git -C /usercontent/ checkout "$branch" 2>/dev/null || true
       git -C /usercontent/ reset --hard "origin/$branch"
@@ -130,7 +134,11 @@ if [[ ! -z "$GIT_URL" ]]; then
     fi
     # Scrub PAT from origin remote — token must not persist to .git/config
     git -C /usercontent/ remote set-url origin "https://${GIT_HOST_PUBLIC}${GIT_PATH}"
-    if [[ ! -z "$branch" ]]; then
+    if [ -n "${GIT_COMMIT_SHA:-}" ]; then
+      echo "checking out exact commit: $GIT_COMMIT_SHA"
+      git -C /usercontent/ fetch origin "$GIT_COMMIT_SHA" 2>/dev/null || true
+      git -C /usercontent/ checkout --detach "$GIT_COMMIT_SHA"
+    elif [[ ! -z "$branch" ]]; then
       echo "checking out branch: $branch"
       git -C /usercontent/ checkout "$branch"
     fi
