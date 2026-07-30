@@ -86,6 +86,28 @@ Environment variables from the Application Config Service are loaded **before** 
 
 For frameworks like Next.js that require environment variables during the build step (e.g. `NEXT_PUBLIC_*`), set them in your Application Config Service parameter store and they will be embedded in the build output automatically.
 
+### Private npm dependencies
+
+Dependency installation (`npm install`) runs in `docker-entrypoint.sh` at container start, after Application Config Service values have been exported into the environment. This means private npm packages already work with no extra runner support: commit an `.npmrc` with a registry-scoped token, and provide the token value via the Application Config Service (as a secret parameter) or via env vars for local `docker run` usage.
+
+```
+//registry.npmjs.org/:_authToken=${NPM_TOKEN}
+```
+
+or for GitHub Packages:
+
+```
+@myscope:registry=https://npm.pkg.github.com/
+//npm.pkg.github.com/:_authToken=${NPM_TOKEN}
+```
+
+Notes:
+
+- Tokens must be registry-scoped (`//host/path/:_authToken=`); a bare unscoped token is invalid.
+- An unresolved `${VAR}` is not treated as an error by npm, it's passed through literally and the registry will reject it as an auth failure (401), not a "missing variable" error. Double check the name matches the parameter/env var exactly.
+- Only `npm install` is run against `package-lock.json`; pnpm/yarn-specific auth files are not read, use npm's `.npmrc` syntax regardless of your local package manager.
+- With `SUB_PATH` set, place `.npmrc` inside the sub-path directory, since that's where `npm install` runs. The runner also writes config values to `.env.osc` in that directory, but that file is not consulted by npm.
+
 ## Contributing
 
 See [CONTRIBUTING](CONTRIBUTING.md)
