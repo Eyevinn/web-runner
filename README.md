@@ -86,6 +86,13 @@ Environment variables from the Application Config Service are loaded **before** 
 
 For frameworks like Next.js that require environment variables during the build step (e.g. `NEXT_PUBLIC_*`), set them in your Application Config Service parameter store and they will be embedded in the build output automatically.
 
+### Node version and package manager detection
+
+The container defaults to Node.js 24 and `npm`, but honors two standard fields in the deployed app's `package.json`:
+
+- **`engines.node`** — if the declared major version differs from the image default, the container switches to a bundled alternate Node major (18, 20, or 22) before installing and building. If the requested major isn't bundled, or the field can't be parsed, the image default is used.
+- **`packageManager`** (the [Corepack](https://nodejs.org/api/corepack.html) field, e.g. `"pnpm@9.12.0"` or `"yarn@4.5.0"`) — when present, `pnpm` or `yarn` is used for install/build/start instead of `npm`. When absent, behavior is unchanged: `npm install --include=dev` and `npm run build`/`build:app` as before.
+
 ## Contributing
 
 See [CONTRIBUTING](CONTRIBUTING.md)
