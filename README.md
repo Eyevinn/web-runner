@@ -108,6 +108,13 @@ Notes:
 - Only `npm install` is run against `package-lock.json`; pnpm/yarn-specific auth files are not read, use npm's `.npmrc` syntax regardless of your local package manager.
 - With `SUB_PATH` set, place `.npmrc` inside the sub-path directory, since that's where `npm install` runs. The runner also writes config values to `.env.osc` in that directory, but that file is not consulted by npm.
 
+### Node version and package manager detection
+
+The container defaults to Node.js 24 and `npm`, but honors two standard fields in the deployed app's `package.json`:
+
+- **`engines.node`** — if the declared major version differs from the image default, the container switches to a bundled alternate Node major (18, 20, or 22) before installing and building. If the requested major isn't bundled, or the field can't be parsed, the image default is used.
+- **`packageManager`** (the [Corepack](https://nodejs.org/api/corepack.html) field, e.g. `"pnpm@9.12.0"` or `"yarn@4.5.0"`) — when present, `pnpm` or `yarn` is used for install/build/start instead of `npm`. When absent, behavior is unchanged: `npm install --include=dev` and `npm run build`/`build:app` as before.
+
 ## Contributing
 
 See [CONTRIBUTING](CONTRIBUTING.md)
