@@ -31,6 +31,15 @@ write_commit_info() {
       '{sha:$sha,shortSha:$shortSha,message:$message,author:$author,date:$date,recentCommits:$recentCommits}' \
       > "$repo_dir/.commit-info.json" 2>/dev/null || true
     echo "Commit info: $(jq -r '.shortSha + " - " + .message' "$repo_dir/.commit-info.json" 2>/dev/null || echo 'unavailable')"
+    # Exclude .commit-info.json from git status so build steps asserting a clean
+    # working tree are not broken by a platform-generated file. Use
+    # rev-parse --git-path so this works with worktrees where .git is a file.
+    if git -C "$repo_dir" rev-parse --git-dir >/dev/null 2>&1; then
+      local excl
+      excl="$(git -C "$repo_dir" rev-parse --git-path info/exclude 2>/dev/null)"
+      mkdir -p "$(dirname "$excl")"
+      grep -qxF '.commit-info.json' "$excl" 2>/dev/null || echo '.commit-info.json' >> "$excl"
+    fi
   fi
 }
 
