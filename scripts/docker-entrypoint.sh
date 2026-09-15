@@ -171,20 +171,52 @@ fi
 
 chown node:node -R /usercontent/
 
-# Exchange runner refresh token for a fresh PAT (if applicable)
+# Exchange runner refresh token for a fresh PAT (if applicable).
+# Uses -s (not -f) so the response body is always captured, even on 4xx errors.
+# This lets us distinguish a revoked/expired runner token (hard fail) from an
+# app that still uses a classic long-lived PAT (backward-compat fallback).
 if [[ ! -z "$OSC_ACCESS_TOKEN" ]] && [[ ! -z "$CONFIG_SVC" ]]; then
-  REFRESH_RESULT=$(curl -sf -X POST \
+  REFRESH_BODY=$(curl -s -w "\n%{http_code}" -X POST \
     "https://token.svc.${OSC_ENV:-prod}.osaas.io/runner-token/refresh" \
     -H "Content-Type: application/json" \
     -d "{\"token\":\"$OSC_ACCESS_TOKEN\"}" 2>/dev/null)
-  if [ $? -eq 0 ] && [ ! -z "$REFRESH_RESULT" ]; then
-    FRESH_PAT=$(echo "$REFRESH_RESULT" | jq -r '.token // empty')
+  REFRESH_HTTP=$(echo "$REFRESH_BODY" | tail -1)
+  REFRESH_JSON=$(echo "$REFRESH_BODY" | head -n -1)
+
+  if [ "$REFRESH_HTTP" = "200" ] && [ ! -z "$REFRESH_JSON" ]; then
+    FRESH_PAT=$(echo "$REFRESH_JSON" | jq -r '.token // empty')
     if [ ! -z "$FRESH_PAT" ]; then
       export OSC_ACCESS_TOKEN="$FRESH_PAT"
       echo "[CONFIG] Refreshed access token via runner refresh token"
     fi
+  elif [ "$REFRESH_HTTP" = "401" ]; then
+    REFRESH_CODE=$(echo "$REFRESH_JSON" | jq -r '.code // empty' 2>/dev/null)
+    case "$REFRESH_CODE" in
+      refresh_token_expired|refresh_token_revoked)
+        # The runner refresh token itself has expired or been revoked.
+        # Falling back silently would produce a misleading "Authorization token
+        # expired" from app-config-svc. Exit with a clear message instead so the
+        # pod enters CrashLoopBackOff with actionable output in the logs.
+        echo "[CONFIG] ERROR: Runner refresh token is $REFRESH_CODE."
+        echo "[CONFIG] The app's runner credentials have expired (365-day token lifetime)."
+        echo "[CONFIG] Action required: Rebuild the app from the OSC dashboard"
+        echo "[CONFIG]   (My Apps → select app → Rebuild) to issue a fresh runner token."
+        exit 1
+        ;;
+      refresh_token_invalid)
+        # OSC_ACCESS_TOKEN is a classic long-lived PAT, not a runner refresh token.
+        # Use it as-is — this is the intended backward-compat path for older apps.
+        ;;
+      *)
+        # Unexpected 401 — fall back to original token (transient or unknown auth error)
+        echo "[CONFIG] WARNING: Runner token refresh returned HTTP 401 (code='$REFRESH_CODE') — using original token"
+        ;;
+    esac
+  else
+    # Non-200, non-401 (5xx, network error, etc.) — fall back to original token so
+    # transient infrastructure issues don't hard-block app startup.
+    echo "[CONFIG] WARNING: Runner token refresh returned HTTP '$REFRESH_HTTP' — using original token"
   fi
-  # If refresh failed, OSC_ACCESS_TOKEN retains its original value (backward compat)
 fi
 
 LOADED_CONFIG_EXPORTS=""
