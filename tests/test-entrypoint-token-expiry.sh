@@ -48,8 +48,9 @@ fi
 # Structural tests — verify the fix is present in the entrypoint source
 # ---------------------------------------------------------------------------
 
-# Test 1: "[CONFIG] Warning:" prefix is used (not the old plain "Warning:")
-if grep -qF '[CONFIG] Warning: Failed to load config' "$ENTRYPOINT"; then
+# Test 1: "[CONFIG] ERROR:" or "[CONFIG] Warning:" prefix is used (not the old plain "Warning:")
+# The entrypoint currently emits "[CONFIG] ERROR: Failed to load config..." — accept either prefix.
+if grep -qE '\[CONFIG\] (ERROR|Warning): Failed to load config' "$ENTRYPOINT"; then
   pass "Failure message uses [CONFIG] prefix"
 else
   fail "Failure message does not use [CONFIG] prefix (found old-style 'Warning:' without prefix?)"
@@ -177,6 +178,38 @@ if echo "$output" | grep -q "Loaded 3 environment variable"; then
   pass "success path emits the correct variable-count message"
 else
   fail "success path is missing the variable-count message"
+fi
+
+# ---------------------------------------------------------------------------
+# Structural tests for token refresh retry logic (issue #1472)
+# ---------------------------------------------------------------------------
+
+# Test 11: retry loop is present (REFRESH_ATTEMPT loop variable)
+if grep -qF 'REFRESH_ATTEMPT' "$ENTRYPOINT"; then
+  pass "Token refresh retry loop (REFRESH_ATTEMPT) is present in entrypoint"
+else
+  fail "Token refresh retry loop (REFRESH_ATTEMPT) is missing from entrypoint"
+fi
+
+# Test 12: retrying message is present
+if grep -qF '[CONFIG] WARNING: token refresh attempt' "$ENTRYPOINT"; then
+  pass "Token refresh retry warning message is present in entrypoint"
+else
+  fail "Token refresh retry warning message ('[CONFIG] WARNING: token refresh attempt') is missing"
+fi
+
+# Test 13: final failure fallback message is present
+if grep -qF '[CONFIG] WARNING: token refresh failed after 3 attempts' "$ENTRYPOINT"; then
+  pass "Token refresh final failure message is present in entrypoint"
+else
+  fail "Token refresh final failure message ('[CONFIG] WARNING: token refresh failed after 3 attempts') is missing"
+fi
+
+# Test 14: sleep 3 between retries is present
+if grep -qF 'sleep 3' "$ENTRYPOINT"; then
+  pass "sleep 3 backoff between retry attempts is present in entrypoint"
+else
+  fail "sleep 3 backoff between retry attempts is missing from entrypoint"
 fi
 
 # ---------------------------------------------------------------------------
