@@ -175,13 +175,32 @@ chown node:node -R /usercontent/
 # Uses -s (not -f) so the response body is always captured, even on 4xx errors.
 # This lets us distinguish a revoked/expired runner token (hard fail) from an
 # app that still uses a classic long-lived PAT (backward-compat fallback).
+# Transient failures (5xx, network errors) are retried up to 3 times with a
+# 3-second backoff before falling back to the stored token.
 if [[ ! -z "$OSC_ACCESS_TOKEN" ]] && [[ ! -z "$CONFIG_SVC" ]]; then
-  REFRESH_BODY=$(curl -s -w "\n%{http_code}" -X POST \
-    "https://token.svc.${OSC_ENV:-prod}.osaas.io/runner-token/refresh" \
-    -H "Content-Type: application/json" \
-    -d "{\"token\":\"$OSC_ACCESS_TOKEN\"}" 2>/dev/null)
-  REFRESH_HTTP=$(echo "$REFRESH_BODY" | tail -1)
-  REFRESH_JSON=$(echo "$REFRESH_BODY" | head -n -1)
+  REFRESH_HTTP=""
+  REFRESH_JSON=""
+  TOKEN_SVC_URL="https://token.svc.${OSC_ENV:-prod}.osaas.io"
+
+  for REFRESH_ATTEMPT in 1 2 3; do
+    REFRESH_BODY=$(curl -s -w "\n%{http_code}" -X POST \
+      "${TOKEN_SVC_URL}/runner-token/refresh" \
+      -H "Content-Type: application/json" \
+      -d "{\"token\":\"$OSC_ACCESS_TOKEN\"}" 2>/dev/null)
+    REFRESH_HTTP=$(echo "$REFRESH_BODY" | tail -1)
+    REFRESH_JSON=$(echo "$REFRESH_BODY" | head -n -1)
+
+    # On a definitive response (200 or 401), stop retrying immediately —
+    # only transient/network failures (empty HTTP code or 5xx) are worth retrying.
+    if [ "$REFRESH_HTTP" = "200" ] || [ "$REFRESH_HTTP" = "401" ]; then
+      break
+    fi
+
+    if [ "$REFRESH_ATTEMPT" -lt 3 ]; then
+      echo "[CONFIG] WARNING: token refresh attempt $REFRESH_ATTEMPT failed (HTTP '$REFRESH_HTTP'), retrying in 3s..."
+      sleep 3
+    fi
+  done
 
   if [ "$REFRESH_HTTP" = "200" ] && [ ! -z "$REFRESH_JSON" ]; then
     FRESH_PAT=$(echo "$REFRESH_JSON" | jq -r '.token // empty')
@@ -213,9 +232,9 @@ if [[ ! -z "$OSC_ACCESS_TOKEN" ]] && [[ ! -z "$CONFIG_SVC" ]]; then
         ;;
     esac
   else
-    # Non-200, non-401 (5xx, network error, etc.) — fall back to original token so
-    # transient infrastructure issues don't hard-block app startup.
-    echo "[CONFIG] WARNING: Runner token refresh returned HTTP '$REFRESH_HTTP' — using original token"
+    # Non-200, non-401 after all retries (5xx, network error, etc.) — fall back to
+    # original token so transient infrastructure issues don't hard-block app startup.
+    echo "[CONFIG] WARNING: token refresh failed after 3 attempts (last HTTP '$REFRESH_HTTP') — using original token"
   fi
 fi
 
