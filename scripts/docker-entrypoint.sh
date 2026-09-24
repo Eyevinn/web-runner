@@ -92,25 +92,42 @@ if [[ ! -z "$GIT_URL" ]]; then
   fi
 
   # Credentials travel via an HTTP Authorization header (git -c
-  # http.extraheader=...) instead of being embedded in the clone/fetch URL —
-  # the same technique actions/checkout uses. A -c value passed to a single
-  # git invocation is never persisted to .git/config, and since it isn't
-  # part of the URL string it cannot appear in "fatal: ... for '<url>'"
+  # http.<url>.extraheader=...) instead of being embedded in the clone/fetch
+  # URL — the same technique actions/checkout uses. A -c value passed to a
+  # single git invocation is never persisted to .git/config, and since it
+  # isn't part of the URL string it cannot appear in "fatal: ... for '<url>'"
   # -style output either. That URL-in-stderr behavior is exactly how the PAT
   # was leaking into pod logs (promtail -> Loki): git itself echoes the URL
   # argument back on a failed clone/fetch, regardless of what this script
   # logs — embedding the token in the URL argument was the vulnerability,
   # not anything this script explicitly printed.
+  #
+  # The header config is scoped to the exact host being cloned/fetched from
+  # (http.https://<host>/.extraheader), NOT a bare http.extraheader. An
+  # unscoped extraheader is attached to every request git makes for the
+  # invocation, including a redirect to a different host; scoping it means
+  # git only attaches the header when the request host matches
+  # GIT_HOST_PUBLIC. Empirically verified: a config key of
+  # "http.https://<host>/.extraheader" is sent on requests to that exact
+  # host (scheme+host must match) and is NOT sent on requests to a
+  # different host, whereas a bare "http.extraheader" is sent to every
+  # host — see PR #56 discussion.
   GIT_AUTH_ARGS=()
   if [[ ! -z "$TOKEN" ]]; then
     AUTH_B64=$(printf '%s' "x-access-token:${TOKEN}" | base64 | tr -d '\n')
-    GIT_AUTH_ARGS=(-c "http.extraheader=AUTHORIZATION: basic ${AUTH_B64}")
+    GIT_AUTH_ARGS=(-c "http.https://${GIT_HOST_PUBLIC}/.extraheader=AUTHORIZATION: basic ${AUTH_B64}")
   elif [[ "$GIT_HOST" != "$GIT_HOST_PUBLIC" ]]; then
     # Gitea: SOURCE_URL pre-embeds user:pass@host — reuse it as the
     # Basic-Auth pair instead of putting it back into the URL.
-    CREDS="${GIT_HOST%%@*}"
+    # Use %@* (single %, shortest suffix match) to split on the LAST "@",
+    # matching the ##*@ (longest prefix match) convention already used for
+    # GIT_HOST_PUBLIC above. A password containing a literal "@" (e.g.
+    # "oscadmin:pa@ss@host") must keep the full password — %%@* (longest
+    # suffix match) would incorrectly split on the FIRST "@" and silently
+    # truncate the password.
+    CREDS="${GIT_HOST%@*}"
     AUTH_B64=$(printf '%s' "$CREDS" | base64 | tr -d '\n')
-    GIT_AUTH_ARGS=(-c "http.extraheader=AUTHORIZATION: basic ${AUTH_B64}")
+    GIT_AUTH_ARGS=(-c "http.https://${GIT_HOST_PUBLIC}/.extraheader=AUTHORIZATION: basic ${AUTH_B64}")
   fi
 
   # Defense in depth: redact any credential-shaped token from a git
