@@ -91,23 +91,51 @@ if [[ ! -z "$GIT_URL" ]]; then
     GIT_PATH="${GIT_PATH%%#*}"  # remove fragment from path
   fi
 
+  # Credentials travel via an HTTP Authorization header (git -c
+  # http.extraheader=...) instead of being embedded in the clone/fetch URL —
+  # the same technique actions/checkout uses. A -c value passed to a single
+  # git invocation is never persisted to .git/config, and since it isn't
+  # part of the URL string it cannot appear in "fatal: ... for '<url>'"
+  # -style output either. That URL-in-stderr behavior is exactly how the PAT
+  # was leaking into pod logs (promtail -> Loki): git itself echoes the URL
+  # argument back on a failed clone/fetch, regardless of what this script
+  # logs — embedding the token in the URL argument was the vulnerability,
+  # not anything this script explicitly printed.
+  GIT_AUTH_ARGS=()
+  if [[ ! -z "$TOKEN" ]]; then
+    AUTH_B64=$(printf '%s' "x-access-token:${TOKEN}" | base64 | tr -d '\n')
+    GIT_AUTH_ARGS=(-c "http.extraheader=AUTHORIZATION: basic ${AUTH_B64}")
+  elif [[ "$GIT_HOST" != "$GIT_HOST_PUBLIC" ]]; then
+    # Gitea: SOURCE_URL pre-embeds user:pass@host — reuse it as the
+    # Basic-Auth pair instead of putting it back into the URL.
+    CREDS="${GIT_HOST%%@*}"
+    AUTH_B64=$(printf '%s' "$CREDS" | base64 | tr -d '\n')
+    GIT_AUTH_ARGS=(-c "http.extraheader=AUTHORIZATION: basic ${AUTH_B64}")
+  fi
+
+  # Defense in depth: redact any credential-shaped token from a git
+  # command's own stderr, in case some other/future git diagnostic leaks
+  # something sensitive we haven't anticipated. 2> >(...) is process
+  # substitution, not a pipe, so it does not affect the wrapped command's
+  # exit code ($?), which the exit-code checks below rely on.
+  git_scrub_stderr() {
+    "$@" 2> >(sed -r 's/gh[pso]_[A-Za-z0-9]{20,}/[REDACTED]/g; s/([Bb]asic )[A-Za-z0-9+\/=]{8,}/\1[REDACTED]/g' >&2)
+  }
+
   git config --global --add safe.directory /usercontent
 
   if [ -d "/usercontent/.git" ]; then
     echo "existing repo found, fetching updates"
-    # Re-inject credentials before fetch — token was scrubbed from origin after initial clone.
-    # Without this, private-repo fetches fail silently and reset resolves stale cached refs.
-    if [[ ! -z "$TOKEN" ]]; then
-      git -C /usercontent/ remote set-url origin "https://${TOKEN}@${GIT_HOST_PUBLIC}${GIT_PATH}"
-    elif [[ "$GIT_HOST" != "$GIT_HOST_PUBLIC" ]]; then
-      git -C /usercontent/ remote set-url origin "https://${GIT_HOST}${GIT_PATH}"
-    fi
-    git -C /usercontent/ fetch origin
-    # Strip credentials again so PAT does not persist in .git/config
+    # Auth travels via GIT_AUTH_ARGS (an HTTP header) rather than an
+    # embedded-credential remote URL, so there is nothing to inject into
+    # origin before fetching and nothing to scrub out afterward. Normalize
+    # origin to the credential-free URL regardless, in case this PVC's
+    # .git/config predates this fix and still has a credentialed origin.
     git -C /usercontent/ remote set-url origin "https://${GIT_HOST_PUBLIC}${GIT_PATH}"
+    git_scrub_stderr git -C /usercontent/ "${GIT_AUTH_ARGS[@]}" fetch origin
     if [ -n "${GIT_COMMIT_SHA:-}" ]; then
       echo "checking out exact commit: $GIT_COMMIT_SHA"
-      git -C /usercontent/ fetch origin "$GIT_COMMIT_SHA" 2>/dev/null || true
+      git_scrub_stderr git -C /usercontent/ "${GIT_AUTH_ARGS[@]}" fetch origin "$GIT_COMMIT_SHA" 2>/dev/null || true
       git -C /usercontent/ checkout --detach "$GIT_COMMIT_SHA"
     elif [[ ! -z "$branch" ]]; then
       echo "resetting to origin/$branch"
@@ -126,26 +154,16 @@ if [[ ! -z "$GIT_URL" ]]; then
     git -C /usercontent/ clean -fd --exclude=node_modules --exclude=.next
     write_commit_info /usercontent
   else
-    # Fresh clone — inject token into the URL if provided
+    # Fresh clone — the URL is always credential-free; auth (if any) travels
+    # via GIT_AUTH_ARGS, so origin is never set with embedded credentials in
+    # the first place and there is nothing to scrub after cloning.
     echo "ensure staging dir is empty"
     rm -rf /usercontent/* /usercontent/.[!.]*
-    if [[ ! -z "$TOKEN" ]]; then
-      echo "cloning https://***@${GIT_HOST_PUBLIC}${GIT_PATH}"
-      git clone "https://${TOKEN}@${GIT_HOST_PUBLIC}${GIT_PATH}" /usercontent/
-    elif [[ "$GIT_HOST" != "$GIT_HOST_PUBLIC" ]]; then
-      # SOURCE_URL embeds credentials (e.g. Gitea: https://user:pass@host/...).
-      # Clone with them in place but keep them out of the log line.
-      echo "cloning https://***@${GIT_HOST_PUBLIC}${GIT_PATH}"
-      git clone "https://${GIT_HOST}${GIT_PATH}" /usercontent/
-    else
-      echo "cloning https://${GIT_HOST_PUBLIC}${GIT_PATH}"
-      git clone "https://${GIT_HOST_PUBLIC}${GIT_PATH}" /usercontent/
-    fi
-    # Scrub PAT from origin remote — token must not persist to .git/config
-    git -C /usercontent/ remote set-url origin "https://${GIT_HOST_PUBLIC}${GIT_PATH}"
+    echo "cloning https://${GIT_HOST_PUBLIC}${GIT_PATH}"
+    git_scrub_stderr git "${GIT_AUTH_ARGS[@]}" clone "https://${GIT_HOST_PUBLIC}${GIT_PATH}" /usercontent/
     if [ -n "${GIT_COMMIT_SHA:-}" ]; then
       echo "checking out exact commit: $GIT_COMMIT_SHA"
-      git -C /usercontent/ fetch origin "$GIT_COMMIT_SHA" 2>/dev/null || true
+      git_scrub_stderr git -C /usercontent/ "${GIT_AUTH_ARGS[@]}" fetch origin "$GIT_COMMIT_SHA" 2>/dev/null || true
       git -C /usercontent/ checkout --detach "$GIT_COMMIT_SHA"
     elif [[ ! -z "$branch" ]]; then
       echo "checking out branch: $branch"
