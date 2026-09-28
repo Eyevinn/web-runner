@@ -276,8 +276,11 @@ fi
 LOADED_CONFIG_EXPORTS=""
 if [[ ! -z "$OSC_ACCESS_TOKEN" ]] && [[ ! -z "$CONFIG_SVC" ]]; then
   echo "[CONFIG] Loading environment variables from config service '$CONFIG_SVC'"
-  config_env_output=$(npx -y @osaas/cli@latest web config-to-env ${OSC_ENV:+--env "$OSC_ENV"} "$CONFIG_SVC" 2>&1)
+  config_env_output=$(timeout 60s npx -y @osaas/cli@latest web config-to-env ${OSC_ENV:+--env "$OSC_ENV"} "$CONFIG_SVC" 2>&1)
   config_exit=$?
+  if [ $config_exit -eq 124 ]; then
+    echo "[CONFIG] WARNING: config-to-env timed out after 60s — continuing boot without those env vars."
+  fi
   if [ $config_exit -eq 0 ]; then
     # Only eval lines that are valid shell export statements to prevent
     # executing error messages or malformed output as shell commands
