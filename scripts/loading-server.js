@@ -30,7 +30,8 @@ http
       }
       return;
     }
-    res.writeHead(200, {
+    const statusCode = buildStatus === "failed" || buildStatus === "building" ? 503 : 200;
+    res.writeHead(statusCode, {
       "Content-Type": "text/html",
       "Cache-Control": "no-cache",
     });
