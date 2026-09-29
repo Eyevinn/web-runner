@@ -18,7 +18,18 @@ FROM node:20-alpine AS node20
 FROM node:22-alpine AS node22
 
 FROM ${NODE_IMAGE}
-RUN apk add --no-cache bash git runuser aws-cli curl jq
+# python3/make/g++ are the standard node-gyp toolchain for Alpine (musl).
+# They are required in this *runtime* image, not a discardable builder
+# stage: docker-entrypoint.sh runs `npm install` (or pnpm/yarn) for each
+# deployed app's own package.json at container start (see the install
+# logic in scripts/docker-entrypoint.sh), not at `docker build` time for a
+# single known app. Any app dependency with native bindings (e.g.
+# better-sqlite3, bcrypt, sharp) that lacks a musl-x64 prebuilt binary for
+# the exact bundled Node major falls through to a from-source node-gyp
+# build, which needs this toolchain present at that point. A multi-stage
+# split (toolchain in a builder, slim final image) does not apply here
+# because there is no single build-time npm install to isolate.
+RUN apk add --no-cache bash git runuser aws-cli curl jq python3 make g++
 
 # Corepack ships with Node 24 and manages yarn/pnpm per the app's
 # package.json "packageManager" field. Enabling it once at build time
