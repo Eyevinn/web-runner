@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# NOTE: behaviour of the config-load failure path (failed state, retries, empty store)
+# is covered by tests/test-entrypoint-config-load-failure.sh, which runs the real entrypoint block.
 # tests/test-entrypoint-token-expiry.sh
 #
 # Shell regression tests for the token expiry warning fix introduced in
