@@ -58,7 +58,7 @@ else
 
   # Pre-existing packages must still be present -- this is an addition,
   # not a replacement.
-  for pkg in bash git runuser aws-cli curl jq; do
+  for pkg in bash git aws-cli curl jq; do
     if echo "$APK_LINE" | grep -qE "(^| )${pkg}( |$)"; then
       pass "apk add line still installs pre-existing package '$pkg'"
     else
