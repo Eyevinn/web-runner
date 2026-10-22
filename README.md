@@ -115,6 +115,18 @@ The container defaults to Node.js 24 and `npm`, but honors two standard fields i
 - **`engines.node`** — if the declared major version differs from the image default, the container switches to a bundled alternate Node major (18, 20, or 22) before installing and building. If the requested major isn't bundled, or the field can't be parsed, the image default is used.
 - **`packageManager`** (the [Corepack](https://nodejs.org/api/corepack.html) field, e.g. `"pnpm@9.12.0"` or `"yarn@4.5.0"`) — when present, `pnpm` or `yarn` is used for install/build/start instead of `npm`. When absent, behavior is unchanged: `npm install --include=dev` and `npm run build`/`build:app` as before.
 
+### Signal handling / graceful shutdown
+
+When the container is stopped (restart, redeploy, scale down) the platform sends `SIGTERM` and, if the container is still running after the grace period (30 seconds by default on Open Source Cloud), `SIGKILL`.
+
+The image runs [tini](https://github.com/krallin/tini) as PID 1 in front of `docker-entrypoint.sh`. The entrypoint starts your app as the `node` user in its own process group and, on `SIGTERM` or `SIGINT`, sends `SIGTERM` once to the server process itself (the process in the group that has no child processes), not to the `npm`, `yarn` or `pnpm` wrapper in front of it. It then waits for the app to exit and exits with the app's exit status. So `npm start`, `yarn start`, `pnpm start` and a custom `CMD` all behave the same: **handle `SIGTERM` in your app** (stop accepting connections, finish in-flight requests, close database connections, exit) and finish within the grace period.
+
+```javascript
+process.on('SIGTERM', () => server.close(() => process.exit(0)));
+```
+
+A restart during the clone/install/build phase stops that phase at once, and the loading/error page server exits on `SIGTERM` too. An app that exits on its own with a non-zero status (a crash, no signal involved) still ends in the error page as before.
+
 ## Contributing
 
 See [CONTRIBUTING](CONTRIBUTING.md)
