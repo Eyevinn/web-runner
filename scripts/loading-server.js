@@ -7,7 +7,7 @@ const buildStatus = process.argv[3] || "building";
 const html = fs.readFileSync(path.join(__dirname, file));
 const port = process.env.PORT || 8080;
 
-http
+const server = http
   .createServer((req, res) => {
     if (req.url === "/__osc/commit-info") {
       try {
@@ -40,3 +40,14 @@ http
   .listen(port, () => {
     console.log(`Loading page server listening on port ${port} (status: ${buildStatus})`);
   });
+
+// Exit promptly on SIGTERM/SIGINT so a restart of a building or failed app does
+// not wait out the platform's grace period (this process can be the container's
+// main process in the failed state, where Node has no default handler for
+// PID 1).
+for (const signal of ["SIGTERM", "SIGINT"]) {
+  process.on(signal, () => {
+    server.close(() => process.exit(0));
+    setTimeout(() => process.exit(0), 1000).unref();
+  });
+}

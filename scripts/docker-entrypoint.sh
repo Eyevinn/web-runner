@@ -68,6 +68,86 @@ elif [[ ! -z "$SOURCE_URL" ]] && [[ "$SOURCE_URL" =~ ^s3://.*$ ]]; then
   S3_URL="$SOURCE_URL"
 fi
 
+# BEGIN signal-handling
+# Graceful shutdown (Eyevinn/osaas-deploy-manager#1969).
+#
+# Kubernetes sends SIGTERM to the container's PID 1 on restart/redeploy and
+# SIGKILLs it after the grace period. tini (the image ENTRYPOINT) forwards the
+# signal to this script, and this script has to hand it on:
+#  - while preparing the app (clone, install, build) every long-running step is
+#    started as a background job and waited on, because bash defers a trap
+#    until the current *foreground* command has finished;
+#  - while the app runs, SIGTERM is sent once to each leaf process of the app's
+#    process group (the server itself, not npm/yarn/sh wrappers that may or may
+#    not forward it), and the script waits until the group is gone and exits
+#    with the app's status, so the app gets the whole grace period to drain.
+SHUTDOWN=0
+CHILD_PID=""
+APP_PID=""
+LOADING_PID=""
+SIGNALLED_PIDS=" "
+
+# Run a command as a background job so a pending SIGTERM/SIGINT trap fires at
+# once. Returns the command's exit status.
+run_cancellable() {
+  "$@" &
+  CHILD_PID=$!
+  wait "$CHILD_PID"
+  local rc=$?
+  CHILD_PID=""
+  return $rc
+}
+
+# Print "<pid> <ppid>" for every live (non-zombie) process in process group $1.
+# /proc/<pid>/stat is "pid (comm) state ppid pgrp ..."; comm may contain
+# spaces and parentheses, so everything up to the last ") " is dropped first.
+app_group_members() {
+  local pgid="$1" stat rest state ppid pgrp f pid
+  for f in /proc/[0-9]*/stat; do
+    stat=$(cat "$f" 2>/dev/null) || continue
+    rest="${stat##*) }"
+    read -r state ppid pgrp _ <<< "$rest"
+    [ "$pgrp" = "$pgid" ] || continue
+    [ "$state" = "Z" ] && continue
+    pid="${f#/proc/}"
+    echo "${pid%%/*} $ppid"
+  done
+}
+
+# Send SIGTERM once to every member of the app's process group that has no
+# child inside that group (the leaves).
+signal_app_leaves() {
+  local members pid ppid parents=" "
+  members=$(app_group_members "$APP_PID")
+  while read -r pid ppid; do
+    [ -n "$pid" ] && parents="$parents$ppid "
+  done <<< "$members"
+  while read -r pid ppid; do
+    [ -n "$pid" ] || continue
+    case "$parents" in *" $pid "*) continue ;; esac
+    case "$SIGNALLED_PIDS" in *" $pid "*) continue ;; esac
+    SIGNALLED_PIDS="$SIGNALLED_PIDS$pid "
+    echo "Received shutdown signal, sending SIGTERM to application process $pid"
+    kill -TERM "$pid" 2>/dev/null
+  done <<< "$members"
+}
+
+on_term() {
+  SHUTDOWN=1
+  if [ -n "$APP_PID" ]; then
+    # Application is running: forward and let the main loop wait for it.
+    signal_app_leaves
+    return 0
+  fi
+  echo "Received shutdown signal during startup, exiting"
+  [ -n "$CHILD_PID" ] && kill -TERM "$CHILD_PID" 2>/dev/null
+  [ -n "$LOADING_PID" ] && kill "$LOADING_PID" 2>/dev/null
+  exit 143
+}
+# END signal-handling
+
+trap on_term TERM INT
+
 node /runner/loading-server.js &
 LOADING_PID=$!
 trap 'kill $LOADING_PID 2>/dev/null; wait $LOADING_PID 2>/dev/null' EXIT
@@ -149,10 +229,10 @@ if [[ ! -z "$GIT_URL" ]]; then
     # origin to the credential-free URL regardless, in case this PVC's
     # .git/config predates this fix and still has a credentialed origin.
     git -C /usercontent/ remote set-url origin "https://${GIT_HOST_PUBLIC}${GIT_PATH}"
-    git_scrub_stderr git -C /usercontent/ "${GIT_AUTH_ARGS[@]}" fetch origin
+    run_cancellable git_scrub_stderr git -C /usercontent/ "${GIT_AUTH_ARGS[@]}" fetch origin
     if [ -n "${GIT_COMMIT_SHA:-}" ]; then
       echo "checking out exact commit: $GIT_COMMIT_SHA"
-      git_scrub_stderr git -C /usercontent/ "${GIT_AUTH_ARGS[@]}" fetch origin "$GIT_COMMIT_SHA" 2>/dev/null || true
+      run_cancellable git_scrub_stderr git -C /usercontent/ "${GIT_AUTH_ARGS[@]}" fetch origin "$GIT_COMMIT_SHA" 2>/dev/null || true
       git -C /usercontent/ checkout --detach "$GIT_COMMIT_SHA"
     elif [[ ! -z "$branch" ]]; then
       echo "resetting to origin/$branch"
@@ -177,10 +257,10 @@ if [[ ! -z "$GIT_URL" ]]; then
     echo "ensure staging dir is empty"
     rm -rf /usercontent/* /usercontent/.[!.]*
     echo "cloning https://${GIT_HOST_PUBLIC}${GIT_PATH}"
-    git_scrub_stderr git "${GIT_AUTH_ARGS[@]}" clone "https://${GIT_HOST_PUBLIC}${GIT_PATH}" /usercontent/
+    run_cancellable git_scrub_stderr git "${GIT_AUTH_ARGS[@]}" clone "https://${GIT_HOST_PUBLIC}${GIT_PATH}" /usercontent/
     if [ -n "${GIT_COMMIT_SHA:-}" ]; then
       echo "checking out exact commit: $GIT_COMMIT_SHA"
-      git_scrub_stderr git -C /usercontent/ "${GIT_AUTH_ARGS[@]}" fetch origin "$GIT_COMMIT_SHA" 2>/dev/null || true
+      run_cancellable git_scrub_stderr git -C /usercontent/ "${GIT_AUTH_ARGS[@]}" fetch origin "$GIT_COMMIT_SHA" 2>/dev/null || true
       git -C /usercontent/ checkout --detach "$GIT_COMMIT_SHA"
     elif [[ ! -z "$branch" ]]; then
       echo "checking out branch: $branch"
@@ -193,12 +273,12 @@ elif [[ ! -z "$S3_URL" ]]; then
     echo "downloading $S3_URL"
     if [[ ! -z "$S3_ENDPOINT_URL" ]]; then
       echo "using S3 endpoint URL: $S3_ENDPOINT_URL"
-      aws s3 cp --endpoint-url "$S3_ENDPOINT_URL" "$S3_URL" /usercontent.zip
+      run_cancellable aws s3 cp --endpoint-url "$S3_ENDPOINT_URL" "$S3_URL" /usercontent.zip
     else
-      aws s3 cp "$S3_URL" /usercontent.zip
+      run_cancellable aws s3 cp "$S3_URL" /usercontent.zip
     fi
     echo "unzipping /usercontent.zip"
-    unzip -q /usercontent.zip -d /usercontent/ && rm -f /usercontent.zip
+    run_cancellable unzip -q /usercontent.zip -d /usercontent/ && rm -f /usercontent.zip
     # Remove any node_modules directory if it exists
     rm -rf /usercontent/node_modules
   fi
@@ -218,10 +298,13 @@ if [[ ! -z "$OSC_ACCESS_TOKEN" ]] && [[ ! -z "$CONFIG_SVC" ]]; then
   TOKEN_SVC_URL="https://token.svc.${OSC_ENV:-prod}.osaas.io"
 
   for REFRESH_ATTEMPT in 1 2 3; do
-    REFRESH_BODY=$(curl -s -w "\n%{http_code}" -X POST \
+    refresh_out_file=$(mktemp)
+    run_cancellable curl -s -w "\n%{http_code}" -X POST \
       "${TOKEN_SVC_URL}/runner-token/refresh" \
       -H "Content-Type: application/json" \
-      -d "{\"token\":\"$OSC_ACCESS_TOKEN\"}" 2>/dev/null)
+      -d "{\"token\":\"$OSC_ACCESS_TOKEN\"}" > "$refresh_out_file" 2>/dev/null
+    REFRESH_BODY=$(cat "$refresh_out_file")
+    rm -f "$refresh_out_file"
     REFRESH_HTTP=$(echo "$REFRESH_BODY" | tail -1)
     REFRESH_JSON=$(echo "$REFRESH_BODY" | head -n -1)
 
@@ -233,7 +316,7 @@ if [[ ! -z "$OSC_ACCESS_TOKEN" ]] && [[ ! -z "$CONFIG_SVC" ]]; then
 
     if [ "$REFRESH_ATTEMPT" -lt 3 ]; then
       echo "[CONFIG] WARNING: token refresh attempt $REFRESH_ATTEMPT failed (HTTP '$REFRESH_HTTP'), retrying in 3s..."
-      sleep 3
+      run_cancellable sleep 3
     fi
   done
 
@@ -283,8 +366,11 @@ if [[ ! -z "$OSC_ACCESS_TOKEN" ]] && [[ ! -z "$CONFIG_SVC" ]]; then
   config_max_attempts=3
   while true; do
     config_failed=0
-    config_env_output=$(timeout 60s npx -y @osaas/cli@latest web config-to-env ${OSC_ENV:+--env "$OSC_ENV"} "$CONFIG_SVC" 2>"$config_err_file")
+    config_out_file=$(mktemp)
+    run_cancellable timeout 60s npx -y @osaas/cli@latest web config-to-env ${OSC_ENV:+--env "$OSC_ENV"} "$CONFIG_SVC" >"$config_out_file" 2>"$config_err_file"
     config_exit=$?
+    config_env_output=$(cat "$config_out_file")
+    rm -f "$config_out_file"
     config_err_output=$(cat "$config_err_file")
     valid_exports=""
     if [ $config_exit -eq 124 ]; then
@@ -314,7 +400,7 @@ if [[ ! -z "$OSC_ACCESS_TOKEN" ]] && [[ ! -z "$CONFIG_SVC" ]]; then
     fi
     echo "[CONFIG] WARNING: Failed to load config (attempt $config_attempt/$config_max_attempts: $config_fail_reason) — retrying in 3s"
     config_attempt=$((config_attempt + 1))
-    sleep 3
+    run_cancellable sleep 3
   done
   rm -f "$config_err_file"
 
@@ -486,7 +572,7 @@ cd "$WORK_DIR"
 # Global husky install is unrelated to the app's own package manager choice
 # (it's a platform-level convenience for npm's "prepare" lifecycle script),
 # so it always uses npm regardless of the detected packageManager.
-npm install -g husky 2>/dev/null || true
+run_cancellable npm install -g husky 2>/dev/null || true
 
 # Restore node_modules from PVC cache if lockfile+package-manager unchanged.
 # Note: we do NOT symlink node_modules because npm's reify step removes
@@ -495,40 +581,40 @@ npm install -g husky 2>/dev/null || true
 if [ -w "/data" ] && [ "$(ls -A /data/node_modules 2>/dev/null)" ] && [ -n "$CACHE_KEY" ] && [ "$CACHE_KEY" = "$CACHED_KEY" ]; then
   echo "$LOCKFILE_NAME unchanged (package manager: $PM_NAME), restoring node_modules from cache"
   rm -rf "$WORK_DIR/node_modules"
-  cp -a /data/node_modules "$WORK_DIR/node_modules"
+  run_cancellable cp -a /data/node_modules "$WORK_DIR/node_modules"
 else
   case "$PM_NAME" in
     pnpm)
       if [ -f "$WORK_DIR/$LOCKFILE_NAME" ]; then
         echo "running pnpm install --frozen-lockfile"
-        pnpm install --frozen-lockfile
+        run_cancellable pnpm install --frozen-lockfile
       else
         echo "running pnpm install (no lockfile present)"
-        pnpm install
+        run_cancellable pnpm install
       fi
       ;;
     yarn)
       if [[ "$PM_VERSION" == 1.* ]]; then
         if [ -f "$WORK_DIR/$LOCKFILE_NAME" ]; then
           echo "running yarn install --frozen-lockfile (yarn classic)"
-          yarn install --frozen-lockfile
+          run_cancellable yarn install --frozen-lockfile
         else
           echo "running yarn install (yarn classic, no lockfile present)"
-          yarn install
+          run_cancellable yarn install
         fi
       else
         if [ -f "$WORK_DIR/$LOCKFILE_NAME" ]; then
           echo "running yarn install --immutable (yarn berry)"
-          yarn install --immutable
+          run_cancellable yarn install --immutable
         else
           echo "running yarn install (yarn berry, no lockfile present)"
-          yarn install
+          run_cancellable yarn install
         fi
       fi
       ;;
     *)
       echo "running npm install"
-      npm install --include=dev
+      run_cancellable npm install --include=dev
       ;;
   esac
   # Cache node_modules and the lockfile+package-manager key to PVC. Guarded
@@ -539,17 +625,17 @@ else
     echo "$CACHE_KEY" > /data/.lockfile-hash
     echo "caching node_modules to PVC"
     rm -rf /data/node_modules
-    cp -a "$WORK_DIR/node_modules" /data/node_modules
+    run_cancellable cp -a "$WORK_DIR/node_modules" /data/node_modules
   fi
 fi
 
 BUILD_EXIT=0
 if has_script build; then
-  "$PM_RUN_BIN" run build
+  run_cancellable "$PM_RUN_BIN" run build
   BUILD_EXIT=$?
 fi
 if [ $BUILD_EXIT -eq 0 ] && has_script build:app; then
-  "$PM_RUN_BIN" run build:app
+  run_cancellable "$PM_RUN_BIN" run build:app
   BUILD_EXIT=$?
 fi
 
@@ -588,8 +674,40 @@ if [ "$PM_NAME" != "npm" ] && [ "${#RUN_ARGS[@]}" -gt 0 ] && [ "${RUN_ARGS[0]}" 
   RUN_ARGS[0]="$PM_NAME"
 fi
 
-runuser -u node "${RUN_ARGS[@]}"
-APP_EXIT=$?
+# Start the app as the unprivileged "node" user without a wrapper process that
+# would sit between this script and the app: setpriv drops privileges and then
+# execs the command. Environment matches what `runuser -u node` provided
+# (non-login, no -m): uid/gid/supplementary groups of node, HOME and SHELL from
+# the passwd entry, USER and LOGNAME set to node, everything else inherited
+# (util-linux login-utils/su-common.c modify_environment()). setsid puts the app
+# in its own session and process group, so its processes can be found by group
+# id when it is time to signal them.
+NODE_PASSWD=$(getent passwd node)
+NODE_HOME=$(echo "$NODE_PASSWD" | cut -d: -f6)
+NODE_SHELL=$(echo "$NODE_PASSWD" | cut -d: -f7)
+env HOME="${NODE_HOME:-/home/node}" SHELL="${NODE_SHELL:-/bin/sh}" USER=node LOGNAME=node \
+  setsid setpriv --reuid=node --regid=node --init-groups "${RUN_ARGS[@]}" &
+APP_PID=$!
+
+# A trapped signal interrupts `wait` (status > 128) while the app is still
+# running; wait again until the process is really gone.
+APP_EXIT=0
+while true; do
+  wait "$APP_PID"
+  APP_EXIT=$?
+  kill -0 "$APP_PID" 2>/dev/null || break
+done
+
+if [ "$SHUTDOWN" = "1" ]; then
+  # Give leftover members of the app's process group (a server that outlived
+  # its package-manager wrapper) the rest of the grace period to finish; the
+  # platform SIGKILLs the container when it runs out.
+  while [ -n "$(app_group_members "$APP_PID")" ]; do
+    sleep 0.2 2>/dev/null || sleep 1
+  done
+  echo "Application stopped after shutdown signal (exit code $APP_EXIT)"
+  exit "$APP_EXIT"
+fi
 
 if [ $APP_EXIT -ne 0 ]; then
   echo "Application exited with code $APP_EXIT"

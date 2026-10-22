@@ -27,7 +27,15 @@ if [ -z "$start" ] || [ -z "$end" ]; then
   echo "FAIL: could not locate config block in $ENTRYPOINT"
   exit 1
 fi
-sed -n "${start},$((end - 1))p" "$ENTRYPOINT" > "$TMP/block.sh"
+# The block runs its long steps through run_cancellable (signal-handling
+# helpers at the top of the entrypoint), so include those definitions.
+hstart=$(grep -n '^# BEGIN signal-handling' "$ENTRYPOINT" | head -1 | cut -d: -f1)
+hend=$(grep -n '^# END signal-handling' "$ENTRYPOINT" | head -1 | cut -d: -f1)
+if [ -z "$hstart" ] || [ -z "$hend" ]; then
+  echo "FAIL: could not locate signal-handling helpers in $ENTRYPOINT"
+  exit 1
+fi
+{ sed -n "${hstart},${hend}p" "$ENTRYPOINT"; sed -n "${start},$((end - 1))p" "$ENTRYPOINT"; } > "$TMP/block.sh"
 
 cat > "$TMP/bin/timeout" <<'STUB'
 #!/usr/bin/env bash
