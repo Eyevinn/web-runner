@@ -1,4 +1,4 @@
-ARG NODE_IMAGE=node:24-alpine
+ARG NODE_IMAGE=node:24.22.1-alpine
 
 # Alpine (musl) userlands for older Node LTS majors, bundled alongside the
 # default image so docker-entrypoint.sh can honor an app's package.json
@@ -15,7 +15,7 @@ ARG NODE_IMAGE=node:24-alpine
 # ~95-100MB per extra major, uncompressed).
 FROM node:18-alpine AS node18
 FROM node:20-alpine AS node20
-FROM node:22-alpine AS node22
+FROM node:22.23.4-alpine AS node22
 
 FROM ${NODE_IMAGE}
 # python3/make/g++ are the standard node-gyp toolchain for Alpine (musl).
