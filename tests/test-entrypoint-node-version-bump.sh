@@ -2,7 +2,7 @@
 # tests/test-entrypoint-node-version-bump.sh
 #
 # Shell regression tests for issue #49: bump the default base image to
-# node:24-alpine and bundle alternate Node majors + Corepack so
+# a pinned node:24.x.y-alpine (patch pin, CVE-2026-111497) and bundle alternate Node majors + Corepack so
 # docker-entrypoint.sh can honor an app's package.json "engines.node" and
 # "packageManager" fields.
 #
@@ -33,6 +33,17 @@ assert_contains() {
   fi
 }
 
+assert_matches() {
+  local description="$1"
+  local regex="$2"
+  local file="$3"
+  if grep -qE "$regex" "$file"; then
+    pass "$description"
+  else
+    fail "$description (regex not matched: '$regex')"
+  fi
+}
+
 assert_not_contains() {
   local description="$1"
   local pattern="$2"
@@ -50,11 +61,11 @@ if [ ! -f "$DOCKERFILE" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Test 1: default base image bumped to node:24-alpine
+# Test 1: default base image is a pinned node:24.x.y-alpine
 # ---------------------------------------------------------------------------
-assert_contains \
-  "ARG NODE_IMAGE defaults to node:24-alpine" \
-  "ARG NODE_IMAGE=node:24-alpine" \
+assert_matches \
+  "ARG NODE_IMAGE defaults to a pinned node:24.x.y-alpine" \
+  '^ARG NODE_IMAGE=node:24\.[0-9]+\.[0-9]+-alpine$' \
   "$DOCKERFILE"
 
 assert_not_contains \
@@ -76,9 +87,9 @@ assert_contains \
   "FROM node:20-alpine AS node20" \
   "$DOCKERFILE"
 
-assert_contains \
-  "node:22-alpine build stage is present" \
-  "FROM node:22-alpine AS node22" \
+assert_matches \
+  "pinned node:22.x.y-alpine build stage is present" \
+  '^FROM node:22\.[0-9]+\.[0-9]+-alpine AS node22$' \
   "$DOCKERFILE"
 
 assert_contains \
