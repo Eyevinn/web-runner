@@ -19,25 +19,30 @@ jobs:
     timeout-minutes: 60
     env:
       MAKER_URL: https://maker.svc.dev.osaas.io
-      MAKER_API_KEY: ${{ secrets.OSC_DEV_MAKER_API_KEY }}
+      SYNC_FORK_API_KEY: ${{ secrets.OSC_DEV_SYNC_FORK_API_KEY }}
       REPO_URL: https://github.com/${{ github.repository }}
     steps:
       - name: Trigger sync-fork
         id: sync
         run: |
           set -euo pipefail
-          if [ -z "$MAKER_API_KEY" ]; then
-            echo "::error::Secret OSC_DEV_MAKER_API_KEY is not set"
+          if [ -z "$SYNC_FORK_API_KEY" ]; then
+            echo "::error::Secret OSC_DEV_SYNC_FORK_API_KEY is not set"
             exit 1
           fi
-          PREV_ORDER_ID=$(curl -sf -G "$MAKER_URL/maker" \
+          ORDERS=$(curl -sSf -G "$MAKER_URL/sync-fork/orders" \
             --data-urlencode "repositoryUrl=$REPO_URL" \
-            -H "Authorization: Bearer $MAKER_API_KEY" \
-            | jq -r '.[0].order.orderId // "none"')
+            -H "Authorization: Bearer $SYNC_FORK_API_KEY")
+          COUNT=$(echo "$ORDERS" | jq 'length')
+          if [ "$COUNT" -gt 1 ]; then
+            echo "::error::Expected at most one order for $REPO_URL, found $COUNT"
+            exit 1
+          fi
+          PREV_ORDER_ID=$(echo "$ORDERS" | jq -r '.[0].order.orderId // "none"')
           echo "Order before sync: $PREV_ORDER_ID"
           echo "prev_order_id=$PREV_ORDER_ID" >> "$GITHUB_OUTPUT"
-          JOB_ID=$(curl -sf -X POST "$MAKER_URL/sync-fork" \
-            -H "Authorization: Bearer $MAKER_API_KEY" \
+          JOB_ID=$(curl -sSf -X POST "$MAKER_URL/sync-fork" \
+            -H "Authorization: Bearer $SYNC_FORK_API_KEY" \
             -H "Content-Type: application/json" \
             -d "{\"repositoryUrl\":\"$REPO_URL\"}" | jq -r '.jobId // empty')
           if [ -z "$JOB_ID" ]; then
@@ -54,7 +59,7 @@ jobs:
           set -euo pipefail
           for i in $(seq 1 60); do
             RESP=$(curl -sf "$MAKER_URL/sync-fork/$JOB_ID" \
-              -H "Authorization: Bearer $MAKER_API_KEY" || echo '{}')
+              -H "Authorization: Bearer $SYNC_FORK_API_KEY" || echo '{}')
             STATUS=$(echo "$RESP" | jq -r '.status // "unknown"')
             echo "sync-fork $JOB_ID status: $STATUS"
             case "$STATUS" in
@@ -75,9 +80,14 @@ jobs:
         run: |
           set -euo pipefail
           for i in $(seq 1 120); do
-            ORDER=$(curl -sf -G "$MAKER_URL/maker" \
+            ORDER=$(curl -sSf -G "$MAKER_URL/sync-fork/orders" \
               --data-urlencode "repositoryUrl=$REPO_URL" \
-              -H "Authorization: Bearer $MAKER_API_KEY" || echo '[]')
+              -H "Authorization: Bearer $SYNC_FORK_API_KEY" || echo '[]')
+            COUNT=$(echo "$ORDER" | jq 'length')
+            if [ "$COUNT" -gt 1 ]; then
+              echo "::error::Expected at most one order for $REPO_URL, found $COUNT"
+              exit 1
+            fi
             ORDER_ID=$(echo "$ORDER" | jq -r '.[0].order.orderId // "none"')
             PHASE=$(echo "$ORDER" | jq -r '.[0].order.status.phase // "NOT_FOUND"')
             echo "order $ORDER_ID phase: $PHASE"
