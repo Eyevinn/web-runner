@@ -67,7 +67,7 @@ chmod +x "$TMP"/bin/*
 # run_block <mode> [token] [config_svc]; sets OUT, NPX_CALLS, NODE_ARGS
 run_block() {
   rm -f "$TMP/npx_calls" "$TMP/node_args"
-  OUT=$(STUB_MODE="$1" STUB_DIR="$TMP" PATH="$TMP/bin:$PATH" OSC_ACCESS_TOKEN="${2-tok}" CONFIG_SVC="${3-mystore}" \
+  OUT=$(STUB_MODE="$1" STUB_DIR="$TMP" PATH="$TMP/bin:$PATH" OSAAS_CLI_VERSION=0.0.0 OSC_ACCESS_TOKEN="${2-tok}" CONFIG_SVC="${3-mystore}" \
     bash -c 'LOADING_PID=999999; . "'"$TMP"'/block.sh"; echo "CONTINUED FOO=$FOO"' 2>&1)
   NPX_CALLS=0
   [ -f "$TMP/npx_calls" ] && NPX_CALLS=$(wc -l < "$TMP/npx_calls" | tr -d ' ')
