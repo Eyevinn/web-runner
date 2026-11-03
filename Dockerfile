@@ -54,6 +54,9 @@ RUN /opt/nodejs/18/bin/corepack enable --install-directory /opt/nodejs/18/bin \
  && /opt/nodejs/20/bin/corepack enable --install-directory /opt/nodejs/20/bin \
  && /opt/nodejs/22/bin/corepack enable --install-directory /opt/nodejs/22/bin
 
+# Version of @osaas/cli that docker-entrypoint.sh runs via npx. This is the
+# single place the version is pinned; bump it here.
+ENV OSAAS_CLI_VERSION=4.35.0
 ENV NODE_ENV=production
 WORKDIR /runner
 COPY ./scripts ./
