@@ -37,6 +37,9 @@ write_commit_info() {
     if git -C "$repo_dir" rev-parse --git-dir >/dev/null 2>&1; then
       local excl
       excl="$(git -C "$repo_dir" rev-parse --git-path info/exclude 2>/dev/null)"
+      # git prints this path relative to the -C directory, not to this script's
+      # cwd (/runner), so make it absolute before touching it.
+      case "$excl" in /*) ;; *) excl="$repo_dir/$excl" ;; esac
       mkdir -p "$(dirname "$excl")"
       grep -qxF '.commit-info.json' "$excl" 2>/dev/null || echo '.commit-info.json' >> "$excl"
     fi
