@@ -51,6 +51,9 @@ case "$STUB_MODE" in
   empty) ;;
   garbled) echo "something unexpected" ;;
   fail) echo "boom" >&2; exit 1 ;;
+  leakfail) echo "export SECRET='s3cr3t-value'"; echo "boom" >&2; exit 1 ;;
+  leaktimeout) echo "export SECRET='s3cr3t-value'"; exit 124 ;;
+  leakgarbled) echo "export 1BAD=s3cr3t-value" ;;
   expired) echo "Authorization token expired" >&2; exit 1 ;;
 esac
 STUB
@@ -89,6 +92,16 @@ run_block expired
 [ "$NODE_ARGS" = "$FAILED_ARGS" ] && pass "expired -> failed state" || fail "expired -> failed state"
 [ "$NPX_CALLS" = "1" ] && pass "expired -> no retry" || fail "expired -> expected 1 attempt, got $NPX_CALLS"
 echo "$OUT" | grep -q "refresh-app-config" && pass "expired -> refresh-app-config hint kept" || fail "expired -> hint missing"
+
+# Secret redaction: stdout (decrypted export lines) must never reach the logs
+for mode in leakfail leaktimeout leakgarbled; do
+  run_block "$mode"
+  [ "$NODE_ARGS" = "$FAILED_ARGS" ] && pass "$mode -> failed state unchanged" || fail "$mode -> failed state (args='$NODE_ARGS')"
+  echo "$OUT" | grep -q "s3cr3t-value" && fail "$mode -> secret leaked to logs" || pass "$mode -> secret not in logs"
+  echo "$OUT" | grep -q "\[CONFIG\] ERROR: Failed to load config" && pass "$mode -> ERROR line logged" || fail "$mode -> ERROR line missing"
+done
+run_block leakfail
+echo "$OUT" | grep -q "boom" && pass "stderr diagnostic still logged" || fail "stderr diagnostic missing"
 
 # Passing paths
 run_block ok
