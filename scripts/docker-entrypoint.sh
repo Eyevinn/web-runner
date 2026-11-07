@@ -302,12 +302,17 @@ if [[ ! -z "$OSC_ACCESS_TOKEN" ]] && [[ ! -z "$CONFIG_SVC" ]]; then
 
   for REFRESH_ATTEMPT in 1 2 3; do
     refresh_out_file=$(mktemp)
+    # The request body is read from a 0600 temp file so the token never
+    # appears in curl's argv (visible in the pod process list).
+    refresh_body_file=$(mktemp)
+    chmod 600 "$refresh_body_file"
+    printf '{"token":"%s"}' "$OSC_ACCESS_TOKEN" > "$refresh_body_file"
     run_cancellable curl -s -w "\n%{http_code}" -X POST \
       "${TOKEN_SVC_URL}/runner-token/refresh" \
       -H "Content-Type: application/json" \
-      -d "{\"token\":\"$OSC_ACCESS_TOKEN\"}" > "$refresh_out_file" 2>/dev/null
+      --data @"$refresh_body_file" > "$refresh_out_file" 2>/dev/null
     REFRESH_BODY=$(cat "$refresh_out_file")
-    rm -f "$refresh_out_file"
+    rm -f "$refresh_out_file" "$refresh_body_file"
     REFRESH_HTTP=$(echo "$REFRESH_BODY" | tail -1)
     REFRESH_JSON=$(echo "$REFRESH_BODY" | head -n -1)
 
@@ -409,7 +414,12 @@ if [[ ! -z "$OSC_ACCESS_TOKEN" ]] && [[ ! -z "$CONFIG_SVC" ]]; then
 
   if [ $config_failed -eq 1 ]; then
     echo "[CONFIG] ERROR: Failed to load config from '$CONFIG_SVC' ($config_fail_reason, exit code $config_exit)."
-    echo "[CONFIG] Raw output: $config_env_output $config_err_output"
+    # Never print config_env_output: it carries decrypted secrets as
+    # `export NAME=value` lines. Only stderr is echoed, with export lines and
+    # credential-shaped tokens removed. The raw variables are still used for
+    # the pattern matching below.
+    config_safe_output=$(printf '%s' "$config_err_output" | grep -v '^export ' | sed -r 's/gh[pso]_[A-Za-z0-9]{20,}/[REDACTED]/g; s/([Bb]asic )[A-Za-z0-9+\/=]{8,}/\1[REDACTED]/g' | tr '\n' ' ')
+    echo "[CONFIG] Diagnostic output (stdout withheld, may contain secrets): $config_safe_output"
     if echo "$config_env_output $config_err_output" | grep -qi "expired\|unauthorized\|401"; then
       echo "[CONFIG] Action required: Your OSC_ACCESS_TOKEN may have expired."
       echo "[CONFIG] Use the 'refresh-app-config' MCP tool to issue a fresh token."
